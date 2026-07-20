@@ -8,7 +8,8 @@
     "userInterfaceStyle": "light",
     "scheme": "jareader",
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-sqlite"
     ],
     "ios": {
       "supportsTablet": true,
@@ -18,6 +19,7 @@
       }
     },
     "android": {
+      "package": "com.jareader.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
