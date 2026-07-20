@@ -38,17 +38,32 @@ Read raw (生肉) Japanese novels and practice vocabulary. Lightweight, free, op
 # Install dependencies
 npm install
 
-# Install Expo CLI
-npm install -g expo-cli
-
 # Start dev server
 npx expo start
+```
 
-# Build for Android
-npx expo export --platform android
+### Build APK (Android)
 
-# Build for iOS (requires macOS or EAS Build)
-npx expo export --platform ios
+**Option A: EAS Build (cloud, recommended)**
+```bash
+npx eas login                          # Create account at expo.dev
+npx eas build --platform android --profile preview
+# Download APK from: https://expo.dev/accounts/[your-account]/projects
+```
+
+**Option B: Local build (requires Android Studio)**
+```bash
+npx expo prebuild --platform android
+cd android
+./gradlew assembleRelease
+# APK at: android/app/build/outputs/apk/release/app-release.apk
+```
+
+### Build for iOS
+
+```bash
+npx eas build --platform ios --profile production
+# Requires Apple Developer account
 ```
 
 ## Translation Setup
