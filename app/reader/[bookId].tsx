@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useReaderStore } from '../../src/store/readerStore';
 import { useBookStore } from '../../src/store/bookStore';
 import { HandModeToggle } from '../../src/components/reader/HandModeToggle';
@@ -157,8 +156,8 @@ export default function ReaderScreen() {
   }, []);
 
   return (
-    <GestureHandlerRootView style={styles.root}>
-      <SafeAreaView style={styles.container}>
+    <>
+    <SafeAreaView style={styles.container}>
         <StatusBar barStyle="dark-content" />
 
         {/* ── Top bar ── */}
@@ -260,12 +259,11 @@ export default function ReaderScreen() {
         onClose={() => setShowNav(false)}
         onSelect={handleOutlineSelect}
       />
-    </GestureHandlerRootView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
   container: { flex: 1, backgroundColor: '#faf9f6' },
   // Top bar
   topBar: {
