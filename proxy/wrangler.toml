@@ -1,0 +1,20 @@
+# Cloudflare Worker — JaReader Translation Proxy
+
+name = "jareader-translation-proxy"
+main = "src/index.ts"
+compatibility_date = "2025-07-01"
+
+# Free tier: 100,000 requests/day — more than enough for personal use
+
+[[d1_databases]]
+binding = "DB"
+database_name = "jareader-cache"
+database_id = ""  # Set after `npx wrangler d1 create jareader-cache`
+
+[vars]
+DEFAULT_PROVIDER = "deepseek"
+
+# Set secrets via CLI:
+#   npx wrangler secret put DEEPSEEK_API_KEY
+#   npx wrangler secret put BAIDU_APP_ID
+#   npx wrangler secret put BAIDU_API_KEY
