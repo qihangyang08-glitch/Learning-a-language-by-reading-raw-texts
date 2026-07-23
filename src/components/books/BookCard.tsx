@@ -1,38 +1,43 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import type { BookMeta } from '../../types/book';
+import { Colors } from '../../utils/constants';
 
 interface BookCardProps {
   book: BookMeta;
   onPress: () => void;
   onLongPress?: () => void;
+  isImporting?: boolean;
 }
 
 /**
- * Book card for the library grid/list.
- * Shows cover, title, author, and reading progress.
+ * Book list item — minimal horizontal layout.
+ * Shows spinner for importing books.
  */
-export function BookCard({ book, onPress, onLongPress }: BookCardProps) {
+export function BookCard({ book, onPress, onLongPress, isImporting }: BookCardProps) {
   const progress = book.totalSentences > 0
     ? Math.round((book.currentSentence / book.totalSentences) * 100)
     : 0;
 
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[styles.card, isImporting && styles.cardImporting]}
       onPress={onPress}
       onLongPress={onLongPress}
-      activeOpacity={0.7}
+      activeOpacity={isImporting ? 1 : 0.6}
+      disabled={isImporting}
     >
-      {/* Cover placeholder */}
-      <View style={styles.coverContainer}>
-        {book.coverPath ? (
-          <Image source={{ uri: book.coverPath }} style={styles.cover} />
-        ) : (
-          <View style={styles.coverPlaceholder}>
-            <Text style={styles.coverIcon}>📖</Text>
-          </View>
-        )}
+      {/* Cover */}
+      <View style={styles.cover}>
+        <View style={styles.coverPlaceholder}>
+          {isImporting ? (
+            <ActivityIndicator size="small" color={Colors.accent} />
+          ) : (
+            <Text style={styles.coverTitle} numberOfLines={3}>
+              {book.title || 'Untitled'}
+            </Text>
+          )}
+        </View>
       </View>
 
       {/* Info */}
@@ -40,95 +45,113 @@ export function BookCard({ book, onPress, onLongPress }: BookCardProps) {
         <Text style={styles.title} numberOfLines={2}>
           {book.title || 'Untitled'}
         </Text>
-        {book.author ? (
-          <Text style={styles.author} numberOfLines={1}>
-            {book.author}
-          </Text>
-        ) : null}
+        {isImporting ? (
+          <Text style={styles.importingLabel}>导入处理中...</Text>
+        ) : (
+          <>
+            {book.author ? (
+              <Text style={styles.author} numberOfLines={1}>
+                {book.author}
+              </Text>
+            ) : null}
 
-        {/* Progress bar */}
-        {book.totalSentences > 0 && (
-          <View style={styles.progressContainer}>
-            <View style={styles.progressBar}>
-              <View
-                style={[styles.progressFill, { width: `${progress}%` }]}
-              />
+            <View style={styles.progressRow}>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${progress}%` }]} />
+              </View>
             </View>
-            <Text style={styles.progressText}>{progress}%</Text>
-          </View>
+
+            <Text style={styles.meta}>
+              {book.totalSentences > 0
+                ? `${book.totalSentences} 句段 · ${progress}%`
+                : '尚未阅读'}
+            </Text>
+          </>
         )}
       </View>
     </TouchableOpacity>
   );
 }
 
+const COVER_W = 64;
+const COVER_H = 88;
+
 const styles = StyleSheet.create({
   card: {
-    flexDirection: 'column',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    overflow: 'hidden',
-    margin: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    flexDirection: 'row',
+    backgroundColor: Colors.card,
+    borderRadius: 6,
+    marginHorizontal: 16,
+    marginVertical: 5,
+    padding: 12,
+    shadowColor: Colors.shadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 1,
+    shadowRadius: 3,
+    elevation: 1,
   },
-  coverContainer: {
-    width: '100%',
-    aspectRatio: 0.7,
-    backgroundColor: '#f0f0f0',
+  cardImporting: {
+    opacity: 0.7,
   },
   cover: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
+    width: COVER_W,
+    height: COVER_H,
+    borderRadius: 4,
+    overflow: 'hidden',
+    backgroundColor: '#f0ede6',
   },
   coverPlaceholder: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#e8e0d8',
+    padding: 6,
+    backgroundColor: '#ece8df',
   },
-  coverIcon: {
-    fontSize: 40,
+  coverTitle: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 13,
   },
   info: {
-    padding: 10,
+    flex: 1,
+    marginLeft: 14,
+    justifyContent: 'center',
   },
   title: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
+    color: Colors.textPrimary,
+    lineHeight: 22,
+    marginBottom: 3,
+  },
+  importingLabel: {
+    fontSize: 13,
+    color: Colors.accent,
+    marginTop: 4,
   },
   author: {
-    fontSize: 12,
-    color: '#888',
-    marginBottom: 8,
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginBottom: 10,
   },
-  progressContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  progressRow: {
+    marginBottom: 4,
   },
-  progressBar: {
-    flex: 1,
-    height: 4,
-    backgroundColor: '#e0e0e0',
-    borderRadius: 2,
+  progressTrack: {
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: '#eae7e0',
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#4a90d9',
-    borderRadius: 2,
+    borderRadius: 1.5,
+    backgroundColor: Colors.accent,
   },
-  progressText: {
+  meta: {
     fontSize: 11,
-    color: '#999',
-    minWidth: 32,
-    textAlign: 'right',
+    color: Colors.textTertiary,
   },
 });

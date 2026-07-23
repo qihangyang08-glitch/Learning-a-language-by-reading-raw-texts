@@ -1,109 +1,156 @@
-# JaReader — 日语小说阅读器
+# JaReader - 日语小说阅读器
 
-JaReader 是一款专为日语学习者设计的手机阅读器，旨在通过优化日语原著（生肉）的阅读体验，帮助用户在阅读中自然提升日语能力。轻量、免费且开源。
+JaReader 是面向中文使用者的 Android 阅读训练工具。用户可以手动导入日语原文小说，将文本自动解析、分章、分句后逐句阅读，以降低长句阅读门槛，并在阅读中积累日语词汇和句型。
 
-## 📱 应用截图
+## 当前特性
 
-*(此处预留应用截图位置，建议插入：主界面、阅读界面、字典查询、翻译效果)*
+- 按句阅读：导入后按语义句段阅读，而不是传统分页铺满整屏。
+- TXT / EPUB 导入：支持纯文本和 EPUB，EPUB 会解析章节文本与插图。
+- 本地书架：书籍、句段、章节图片、阅读进度、书签和翻译缓存写入本机 SQLite。
+- 离线词典：构建好的词典 JSON 随包分发，首次启动导入 SQLite FTS 索引。
+- 点按查词：使用轻量分词与最长匹配查询，支持单词和短语查词。
+- 整句翻译：用户在设置中填入 DeepSeek API Key 后可翻译当前句段，结果会缓存。
+- TTS 朗读：优先使用可配置 Edge TTS 服务，失败时回退到系统日语 TTS。
+- 单手阅读：支持双手、左手、右手模式和手动横竖屏切换。
 
----
+## 技术栈
 
-## ✨ 应用特性
-
-- **按句阅读** — 创新性的阅读模式，将每一“页”拆分为语义完整的句子，降低长句阅读压力。
-- **即点即查** — 点击任何单词即可调出离线词典（基于 JMdict），支持形态分析。
-- **TTS 语音朗读** — 集成系统级与云端语音引擎，支持自动回退切换。
-- **智能翻译** — 可选的 AI 辅助翻译，通过安全代理连接 DeepSeek 等模型，助你攻克难句。
-- **单手操作优化** — 提供左右手布局切换，支持大屏单手顺畅阅读。
-- **大纲与搜索** — 类似圣经风格的章节索引，支持快速搜索与跳转。
-- **书签系统** — 收藏难句或精彩段落，便于后续复习。
-- **全系统暗黑模式** — 完美适配白天与黑夜阅读场景。
-- **跨平台支持** — 基于 React Native + Expo 开发，支持 Android 和 iOS。
-
-## 📂 支持格式
-
-- **当前支持**: `.txt`, `.epub` (原生高效解析)
-- **计划中**: `.mobi`, `.pdf`
-
-## 🛠️ 技术栈
-
-| 层级 | 技术选型 |
-|-------|--------|
-| 框架 | React Native + Expo SDK 57 |
+| 层级 | 选型 |
+| --- | --- |
+| App 框架 | Expo SDK 57 + React Native 0.86 |
+| React | 19.2.3 |
 | 路由 | expo-router |
 | 状态管理 | Zustand |
-| 数据库 | expo-sqlite (同步 API) |
-| 分词器 | kuromoji.js |
-| 词典 | JMdict (转换为 SQLite FTS5) |
-| 翻译 | Cloudflare Worker 代理 → DeepSeek API |
+| 本地数据库 | expo-sqlite |
+| 文件导入 | expo-document-picker + expo-file-system/legacy |
+| 音频/TTS | expo-audio + expo-speech |
+| 分词 | tiny-segmenter + 自定义规则 |
+| Android | 已提交 `android/` 原生工程，可直接用 Android Studio 打开 |
 
----
+> Expo SDK 57 要求 Node.js 22.13.x 起，Android compileSdk/targetSdk 为 36。版本信息以 Expo v57 文档为准。
 
-## 🚀 快速开始
+## 开发环境
 
-### 1. 环境准备
-
-确保你的开发环境已安装：
-- [Node.js](https://nodejs.org/) (建议 LTS 版本)
-- [Git](https://git-scm.com/)
-
-### 2. 安装与启动
+1. 安装 Node.js 22.13.x 或更高的兼容版本。
+2. 安装 Android Studio，并安装 Android SDK 36。
+3. 安装项目依赖：
 
 ```bash
-# 克隆项目 (如果你还没克隆)
-# git clone https://github.com/your-repo/learn-jaReading-by-novel.git
-# cd learn-jaReading-by-novel
-
-# 安装依赖
 npm install
-
-# 启动开发服务器
-npx expo start
 ```
 
-使用手机下载 **Expo Go** 应用，扫描终端生成的二维码即可进行实时调试。
+## Expo 开发
 
----
+```bash
+npm run start
+```
 
-## 📦 打包与发布
+或直接运行 Android：
 
-### 环境配置
+```bash
+npm run android
+```
 
-如果是本地打包，你需要安装：
-- **Android**: Android Studio 及配置好的 Android SDK。
-- **iOS**: macOS + Xcode (仅限 iOS 打包)。
+## Android Studio 开发
 
-### 方案 A：使用 EAS Build (推荐，云端打包)
+仓库已经包含 Expo prebuild 生成的 `android/` 工程。
 
-这是最简单的方法，无需配置复杂的本地 Android/iOS 环境。
+1. 用 Android Studio 打开项目根目录下的 `android` 文件夹。
+2. 等待 Gradle Sync 完成。
+3. 选择 `app` 配置运行或调试。
 
-1. 安装 EAS CLI: `npm install -g eas-cli`
-2. 登录 Expo 账号: `npx eas login`
-3. 执行打包命令：
-   - **Android APK**: `npx eas build --platform android --profile preview`
-   - **iOS**: `npx eas build --platform ios --profile production`
+不要提交以下本地文件：
 
-### 方案 B：本地离线打包
+- `android/local.properties`
+- `android/.gradle/`
+- `android/build/`
+- `android/app/build/`
+- `.expo/`
+- `node_modules/`
 
-1. 生成原生工程：
-   ```bash
-   npx expo prebuild --platform android
-   ```
-2. 进入原生目录编译：
-   ```bash
-   cd android
-   ./gradlew assembleRelease
-   ```
-   生成的 APK 位于：`android/app/build/outputs/apk/release/app-release.apk`
+这些内容已经被 `.gitignore` 忽略。
 
----
+因为 `android/` 已作为源码提交，`app.json` 中的原生配置不会自动同步到 Android 工程。修改包名、图标、启动页、权限等原生配置时，需要同步检查 `android/` 下的对应文件。
 
-## 📖 词典与翻译设置
+## 词典
 
-- **词典**: 首次启动时会下载 JMdict 数据（约 25MB）并自动构建离线索引，过程需保持网络畅通。
-- **翻译**: 默认使用公共代理。你也可以在 `proxy/` 目录下找到代码并部署自己的 Cloudflare Worker 代理以获得更稳定的体验。
+运行时词典成品位于：
 
-## 📄 开源协议
+- `assets/dictionary/dict-data.json`
+- `assets/dictionary/jareader.db`
 
-本项目采用 [MIT](LICENSE) 协议开源。
-词典数据来源于 JMdict (CC-BY-SA 协议)。
+`src/services/dictionary-plugin.js` 会在 prebuild 时把 `dict-data.json` 复制到 Android assets。当前仓库也提交了 `android/app/src/main/assets/dictionary/dict-data.json`，方便 Android Studio 直接构建。
+
+词典原始源文件、转换临时目录、示例 EPUB 不进入版本库。
+
+## 翻译与 TTS
+
+- 翻译：应用直接请求 DeepSeek API，API Key 由用户在设置页输入，并保存到 SecureStore。
+- TTS：可选配置本地 `edge-tts-server/`，也可以直接使用系统日语 TTS 兜底。
+
+启动本地 Edge TTS 服务：
+
+```powershell
+cd edge-tts-server
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app:app --host 0.0.0.0 --port 8787
+```
+
+真机 USB 调试时可使用：
+
+```powershell
+adb reverse tcp:8787 tcp:8787
+```
+
+然后在应用设置中填入：
+
+```text
+http://127.0.0.1:8787
+```
+
+## 构建
+
+本地 Debug APK：
+
+```bash
+cd android
+./gradlew assembleDebug
+```
+
+本地 Release APK：
+
+```bash
+cd android
+./gradlew assembleRelease
+```
+
+Windows PowerShell 可使用：
+
+```powershell
+cd android
+.\gradlew.bat assembleDebug
+```
+
+## 项目整理规则
+
+仓库保留：
+
+- App 源码
+- Android 原生工程源码
+- 必需图片资源
+- 运行时词典成品
+- 词典构建脚本与 Edge TTS 服务源码
+- 下一轮迭代规划文档
+
+仓库不保留：
+
+- APK / ZIP 发布包
+- Gradle、Expo、Metro、Node 缓存
+- 手动导入的小说原文
+- 词典原始源目录和转换临时目录
+- 本机 IDE 配置和 SDK 路径
+
+## 许可证
+
+本项目采用 [MIT](LICENSE) 协议。

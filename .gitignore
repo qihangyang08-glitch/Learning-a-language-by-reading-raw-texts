@@ -5,6 +5,7 @@ node_modules/
 
 # Expo
 .expo/
+.dict-tmp/
 dist/
 web-build/
 expo-env.d.ts
@@ -17,6 +18,13 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+android/.gradle/
+android/.idea/
+android/.kotlin/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/local.properties
 
 # Metro
 .metro-health-check*
@@ -32,14 +40,24 @@ yarn-error.*
 
 # local env files
 .env*.local
+edge-tts-server/.venv/
+edge-tts-server/*.mp3
+edge-tts-server/__pycache__/
+scripts/__pycache__/
+_disabled-kokoro/
+小学館中日日中統合辞書第2版 有附录/
+小学馆v3/
+*.epub
+assets/*.jpg
+logo.*
 
 # typescript
 *.tsbuildinfo
 
 # generated native folders
 /ios
-/android
 
 # IDE
 .idea/
 *.apk
+*.zip

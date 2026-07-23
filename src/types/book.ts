@@ -3,7 +3,7 @@
  */
 
 /** Supported book file formats */
-export type BookFormat = 'txt' | 'epub' | 'mobi' | 'pdf';
+export type BookFormat = 'txt' | 'epub';
 
 /** Book metadata stored in SQLite */
 export interface BookMeta {
@@ -25,7 +25,16 @@ export interface Sentence {
   chapterIndex: number; // chapter number (0-based)
   sentenceIndex: number;// sentence number within chapter (0-based)
   text: string;         // raw text content
-  tokens?: Token[];     // kuromoji tokens (lazy-loaded)
+  tokens?: Token[];     // tiny-segmenter tokens (lazy-computed at read time)
+}
+
+/** An inline image extracted from the book */
+export interface BookImage {
+  id: string;           // unique id for this image
+  filePath: string;     // local filesystem path
+  mimeType: string;     // e.g. "image/jpeg", "image/png"
+  position: number;     // character position in the chapter raw text
+  alt?: string;         // alt text from <img> tag
 }
 
 /** A parsed chapter (from epub spine or txt split) */
@@ -33,6 +42,7 @@ export interface Chapter {
   index: number;
   title?: string;
   sentences: Sentence[];
+  images?: BookImage[];  // inline images within this chapter
 }
 
 /** Parsed book content */
@@ -71,4 +81,27 @@ export interface ImportProgress {
   stage: 'parsing' | 'segmenting' | 'storing' | 'done' | 'error';
   progress: number;     // 0-1
   message: string;
+}
+
+/** Import status for placeholder book entry */
+export type ImportStatus = 'processing' | 'done' | 'error';
+
+/** Cached translation (stored in SQLite, keyed by book+sentence) */
+export interface TranslationCache {
+  id?: number;
+  bookId: string;
+  sentenceIndex: number;
+  translated: string;
+  createdAt: number;
+}
+
+/** Manual screen orientation (user toggle, not auto) */
+export type ManualOrientation = 'portrait' | 'landscape';
+
+/** Bookmark entry */
+export interface Bookmark {
+  id?: number;
+  bookId: string;
+  sentenceIndex: number;
+  createdAt: number;
 }

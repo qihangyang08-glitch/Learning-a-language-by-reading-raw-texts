@@ -1,3 +1,9 @@
 {
-    "java.configuration.updateBuildConfiguration": "interactive"
+  // VS Code is used for editing only — builds happen in Android Studio
+  "java.configuration.updateBuildConfiguration": "disabled",
+  "java.autobuild.enabled": false,
+  "java.import.gradle.enabled": false,
+  "java.compile.nullAnalysis.mode": "disabled",
+  "expo.automaticallyReload": false,
+  "typescript.tsserver.experimental.enableProjectDiagnostics": false
 }

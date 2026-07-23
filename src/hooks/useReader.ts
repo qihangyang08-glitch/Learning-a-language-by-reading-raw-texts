@@ -1,6 +1,5 @@
 import { useCallback, useMemo } from 'react';
 import { useReaderStore } from '../store/readerStore';
-import { useBookStore } from '../store/bookStore';
 import { useDictionary } from './useDictionary';
 import type { Token, Sentence } from '../types/book';
 import type { LookupResult } from '../types/reader';
@@ -10,11 +9,12 @@ import type { LookupResult } from '../types/reader';
  */
 export function useReader() {
   const reader = useReaderStore();
-  const { books, updateProgress } = useBookStore();
   const { tokenizerState, tokenizerProgress, isReady, tokenize, lookup } =
     useDictionary();
 
-  const currentSentence: Sentence | undefined = reader.sentences[reader.currentIndex];
+  const currentSentence: Sentence | undefined = reader.sentences.find(
+    (s) => s.index === reader.currentIndex,
+  );
 
   // Tokenize current sentence when it changes and tokenizer is ready
   const tokenizedSentence = useMemo((): Sentence | undefined => {
@@ -68,7 +68,6 @@ export function useReader() {
 
     // TTS
     isReading: reader.isReading,
-    autoAdvance: reader.autoAdvance,
 
     // Dictionary
     showResult: reader.showResult,
@@ -88,7 +87,6 @@ export function useReader() {
     setLineHeight: reader.setLineHeight,
     toggleTranslation: reader.toggleTranslation,
     setIsReading: reader.setIsReading,
-    setAutoAdvance: reader.setAutoAdvance,
     handleWordPress,
     handleDismissResult,
   };

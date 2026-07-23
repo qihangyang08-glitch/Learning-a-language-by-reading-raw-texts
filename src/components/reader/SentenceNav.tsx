@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,13 +7,32 @@ import {
   TouchableOpacity,
   TextInput,
   FlatList,
+  Pressable,
   useWindowDimensions,
+  ActivityIndicator,
 } from 'react-native';
-import type { Sentence } from '../../types/book';
+import {
+  loadChapterGroups,
+  loadChapterSentencePreviews,
+} from '../../services/bookshelf';
+import { Colors } from '../../utils/constants';
+
+interface SentencePreview {
+  index: number;
+  sentenceIndex: number;
+  preview: string;
+}
+
+interface ChapterGroup {
+  chapterIndex: number;
+  count: number;
+  firstIndex: number;
+  sentences?: SentencePreview[]; // lazy-loaded
+}
 
 interface SentenceNavProps {
   visible: boolean;
-  sentences: Sentence[];
+  bookId: string | null;
   currentIndex: number;
   bookmarks: Set<number>;
   onClose: () => void;
@@ -21,269 +40,366 @@ interface SentenceNavProps {
 }
 
 /**
- * Outline navigation — Bible-style sentence index.
- * Shows all sentences with chapter.sentence numbering,
- * search/filter, and bookmark highlights.
- * Opens as a bottom sheet modal.
+ * Outline navigation — bottom sheet style.
+ * - Slides up from bottom, covers ~60% of screen
+ * - Chapter grouping with lazy-loaded sentence previews
+ * - Search across chapter previews
+ * - Tap backdrop to dismiss
+ * - Dense list for efficient browsing
  */
 export function SentenceNav({
   visible,
-  sentences,
+  bookId,
   currentIndex,
   bookmarks,
   onClose,
   onSelect,
 }: SentenceNavProps) {
   const [search, setSearch] = useState('');
+  const [chapters, setChapters] = useState<ChapterGroup[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [expandedChapters, setExpandedChapters] = useState<Set<number>>(new Set());
   const { height } = useWindowDimensions();
 
-  // Group sentences by chapter
-  const filtered = useMemo(() => {
-    let list = sentences;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = sentences.filter((s) => s.text.toLowerCase().includes(q));
-    }
-    return list;
-  }, [sentences, search]);
+  // Load chapter groups on open
+  useEffect(() => {
+    if (visible && bookId) {
+      setLoading(true);
+      try {
+        const groups = loadChapterGroups(bookId);
+        setChapters(groups);
 
-  // Build chapter groups
-  const chapterGroups = useMemo(() => {
-    const groups: { chapterIndex: number; items: Sentence[] }[] = [];
-    for (const s of filtered) {
-      const last = groups[groups.length - 1];
-      if (!last || last.chapterIndex !== s.chapterIndex) {
-        groups.push({ chapterIndex: s.chapterIndex, items: [s] });
+        // Auto-expand the chapter containing the current sentence
+        const currentChapter = groups.find(
+          (g) => g.firstIndex <= currentIndex && g.firstIndex + g.count > currentIndex,
+        );
+        if (currentChapter) {
+          setExpandedChapters(new Set([currentChapter.chapterIndex]));
+        }
+      } catch (err) {
+        console.warn('[SentenceNav] Load failed:', err);
+        setChapters([]);
+      }
+      setLoading(false);
+    }
+    if (!visible) {
+      setSearch('');
+      setExpandedChapters(new Set());
+    }
+  }, [visible, bookId, currentIndex]);
+
+  // Toggle chapter expansion — lazy load sentences
+  const toggleChapter = useCallback((chIdx: number) => {
+    setExpandedChapters((prev) => {
+      const next = new Set(prev);
+      if (next.has(chIdx)) {
+        next.delete(chIdx);
       } else {
-        last.items.push(s);
+        next.add(chIdx);
+        // Lazy load sentences for this chapter
+        setChapters((prevChapters) =>
+          prevChapters.map((ch) => {
+            if (ch.chapterIndex === chIdx && !ch.sentences && bookId) {
+              const previews = loadChapterSentencePreviews(bookId, chIdx);
+              return { ...ch, sentences: previews };
+            }
+            return ch;
+          }),
+        );
+      }
+      return next;
+    });
+  }, [bookId]);
+
+  // Search filter
+  const searchResults = useMemo(() => {
+    if (!search.trim()) return null;
+    const q = search.toLowerCase();
+    const results: SentencePreview[] = [];
+
+    for (const ch of chapters) {
+      // Load sentences for search if not loaded
+      if (!ch.sentences && bookId) {
+        ch.sentences = loadChapterSentencePreviews(bookId, ch.chapterIndex);
+      }
+      if (ch.sentences) {
+        for (const s of ch.sentences) {
+          if (s.preview.toLowerCase().includes(q)) {
+            results.push(s);
+          }
+        }
       }
     }
-    return groups;
-  }, [filtered]);
+    return results.slice(0, 200); // cap search results
+  }, [search, chapters, bookId]);
+
+  const panelHeight = height * 0.62;
 
   return (
     <Modal
       visible={visible}
       animationType="slide"
-      presentationStyle="pageSheet"
+      transparent
+      statusBarTranslucent
       onRequestClose={onClose}
     >
-      <View style={[styles.container, { maxHeight: height * 0.85 }]}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>纲目</Text>
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-            <Text style={styles.closeText}>✕</Text>
-          </TouchableOpacity>
-        </View>
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        {/* Prevent backdrop press from closing when tapping the panel */}
+        <Pressable style={[styles.panel, { height: panelHeight }]}>
+          {/* Header */}
+          <View style={styles.header}>
+            <View style={styles.handle} />
+            <Text style={styles.title}>纲目</Text>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.5}>
+              <Text style={styles.closeText}>✕</Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* Search bar */}
-        <View style={styles.searchBar}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="搜索句段..."
-            placeholderTextColor="#ccc"
-            value={search}
-            onChangeText={setSearch}
-            clearButtonMode="while-editing"
-          />
-          {search.length > 0 && (
-            <Text style={styles.searchCount}>
-              {filtered.length} / {sentences.length}
-            </Text>
-          )}
-        </View>
+          {/* Search */}
+          <View style={styles.searchBar}>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="搜索..."
+              placeholderTextColor={Colors.textTertiary}
+              value={search}
+              onChangeText={setSearch}
+              clearButtonMode="while-editing"
+            />
+          </View>
 
-        {/* Sentence list */}
-        <FlatList
-          data={chapterGroups}
-          keyExtractor={(g) => `ch-${g.chapterIndex}`}
-          initialScrollIndex={Math.max(
-            0,
-            chapterGroups.findIndex(
-              (g) =>
-                g.items[0] &&
-                g.items[0].index <= currentIndex &&
-                g.items[g.items.length - 1].index >= currentIndex,
-            ),
-          )}
-          getItemLayout={(_, index) => ({
-            length: 200,
-            offset: 200 * index,
-            index,
-          })}
-          renderItem={({ item: group }) => (
-            <View key={`ch-${group.chapterIndex}`}>
-              {/* Chapter header */}
-              <View style={styles.chapterHeader}>
-                <Text style={styles.chapterText}>
-                  Chapter {group.chapterIndex + 1}
-                </Text>
-                <Text style={styles.chapterCount}>
-                  {group.items.length} sentences
-                </Text>
-              </View>
-
-              {/* Sentences */}
-              {group.items.map((sentence) => {
-                const isActive = sentence.index === currentIndex;
-                const isBookmarked = bookmarks.has(sentence.index);
-                const preview =
-                  sentence.text.length > 40
-                    ? sentence.text.slice(0, 40) + '...'
-                    : sentence.text;
-
-                return (
-                  <TouchableOpacity
-                    key={`s-${sentence.index}`}
-                    style={[
-                      styles.sentenceRow,
-                      isActive && styles.sentenceActive,
-                    ]}
-                    onPress={() => onSelect(sentence.index)}
-                  >
-                    <Text style={styles.sentenceNum}>
-                      [{sentence.chapterIndex + 1}.{sentence.sentenceIndex + 1}]
-                    </Text>
-                    {isBookmarked && <Text style={styles.bookmarkIcon}>🔖</Text>}
-                    <Text
-                      style={[
-                        styles.sentencePreview,
-                        isActive && styles.sentencePreviewActive,
-                      ]}
-                      numberOfLines={2}
-                    >
-                      {preview}
-                    </Text>
-                  </TouchableOpacity>
-                );
+          {/* Content */}
+          {loading ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="small" color={Colors.accent} />
+            </View>
+          ) : searchResults ? (
+            <FlatList
+              data={searchResults}
+              keyExtractor={(s) => `sr-${s.index}`}
+              renderItem={({ item }) => (
+                <SentenceRow
+                  chapterIndex={0}
+                  sentence={item}
+                  isActive={item.index === currentIndex}
+                  isBookmarked={bookmarks.has(item.index)}
+                  onSelect={onSelect}
+                />
+              )}
+              ListEmptyComponent={
+                <View style={styles.empty}>
+                  <Text style={styles.emptyText}>无匹配结果</Text>
+                </View>
+              }
+            />
+          ) : (
+            <FlatList
+              data={chapters}
+              keyExtractor={(ch) => `ch-${ch.chapterIndex}`}
+              getItemLayout={(_, index) => ({
+                length: CHAPTER_HEADER_H,
+                offset: CHAPTER_HEADER_H * index,
+                index,
               })}
-            </View>
+              renderItem={({ item: ch }) => {
+                const isExpanded = expandedChapters.has(ch.chapterIndex);
+                return (
+                  <View>
+                    <TouchableOpacity
+                      style={styles.chapterHeader}
+                      onPress={() => toggleChapter(ch.chapterIndex)}
+                      activeOpacity={0.6}
+                    >
+                      <Text style={styles.chapterText}>
+                        Ch.{ch.chapterIndex + 1}
+                      </Text>
+                      <Text style={styles.chapterCount}>
+                        {ch.count}句 {isExpanded ? '▲' : '▼'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {isExpanded && ch.sentences && ch.sentences.map((s) => (
+                      <SentenceRow
+                        key={`s-${s.index}`}
+                        chapterIndex={ch.chapterIndex}
+                        sentence={s}
+                        isActive={s.index === currentIndex}
+                        isBookmarked={bookmarks.has(s.index)}
+                        onSelect={onSelect}
+                      />
+                    ))}
+
+                    {isExpanded && !ch.sentences && (
+                      <View style={styles.loadingRow}>
+                        <ActivityIndicator size="small" color={Colors.textTertiary} />
+                      </View>
+                    )}
+                  </View>
+                );
+              }}
+              ListEmptyComponent={
+                <View style={styles.empty}>
+                  <Text style={styles.emptyText}>无句段数据</Text>
+                </View>
+              }
+            />
           )}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyText}>
-                {search ? '无匹配结果' : '无句段数据'}
-              </Text>
-            </View>
-          }
-        />
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }
 
+function SentenceRow({
+  chapterIndex,
+  sentence,
+  isActive,
+  isBookmarked,
+  onSelect,
+}: {
+  chapterIndex: number;
+  sentence: SentencePreview;
+  isActive: boolean;
+  isBookmarked: boolean;
+  onSelect: (index: number) => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.sentenceRow, isActive && styles.sentenceActive]}
+      onPress={() => onSelect(sentence.index)}
+      activeOpacity={0.6}
+    >
+      <Text style={[styles.sentenceNum, isActive && styles.sentenceNumActive]}>
+        {chapterIndex + 1}.{sentence.sentenceIndex + 1}
+      </Text>
+      {isBookmarked && <Text style={styles.bookmarkIcon}>◆</Text>}
+      <Text
+        style={[styles.sentencePreview, isActive && styles.sentencePreviewActive]}
+        numberOfLines={1}
+      >
+        {sentence.preview}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+const CHAPTER_HEADER_H = 36;
+
 const styles = StyleSheet.create({
-  container: {
+  backdrop: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'flex-end',
+  },
+  panel: {
+    backgroundColor: Colors.bg,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e8e8e8',
+    paddingTop: 6,
+    paddingBottom: 8,
+  },
+  handle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.divider,
+    position: 'absolute',
+    top: 8,
+    alignSelf: 'center',
+    left: '50%',
+    marginLeft: -18,
   },
   title: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#333',
+    color: Colors.textPrimary,
   },
-  closeBtn: {
-    padding: 6,
-  },
-  closeText: {
-    fontSize: 18,
-    color: '#999',
-  },
-  // Search
+  closeBtn: { padding: 6 },
+  closeText: { fontSize: 16, color: Colors.textSecondary },
   searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    paddingBottom: 8,
   },
   searchInput: {
-    flex: 1,
-    height: 38,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
+    height: 34,
+    backgroundColor: Colors.card,
+    borderRadius: 6,
     paddingHorizontal: 12,
-    fontSize: 14,
-    color: '#333',
+    fontSize: 13,
+    color: Colors.textPrimary,
   },
-  searchCount: {
-    marginLeft: 8,
-    fontSize: 12,
-    color: '#aaa',
+  loadingWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  // Chapter
   chapterHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#f8f8f8',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    height: CHAPTER_HEADER_H,
+    backgroundColor: Colors.card,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.divider,
   },
   chapterText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#888',
+    color: Colors.textSecondary,
   },
   chapterCount: {
     fontSize: 11,
-    color: '#bbb',
+    color: Colors.textTertiary,
   },
-  // Sentences
   sentenceRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f5f5f5',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: Colors.card,
     gap: 6,
   },
   sentenceActive: {
-    backgroundColor: '#f0f4ff',
+    backgroundColor: Colors.accentLight,
   },
   sentenceNum: {
-    fontSize: 12,
-    color: '#999',
+    fontSize: 10,
+    color: Colors.textTertiary,
     fontWeight: '600',
-    minWidth: 48,
-    marginTop: 2,
+    minWidth: 36,
   },
+  sentenceNumActive: { color: Colors.accent },
   bookmarkIcon: {
-    fontSize: 12,
-    marginTop: 2,
+    fontSize: 9,
+    color: Colors.accent,
   },
   sentencePreview: {
     flex: 1,
-    fontSize: 14,
-    color: '#555',
-    lineHeight: 20,
+    fontSize: 13,
+    color: Colors.textSecondary,
+    lineHeight: 18,
   },
   sentencePreviewActive: {
-    color: '#4a90d9',
+    color: Colors.textPrimary,
     fontWeight: '500',
   },
+  loadingRow: {
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
   empty: {
-    padding: 40,
+    padding: 32,
     alignItems: 'center',
   },
   emptyText: {
-    fontSize: 15,
-    color: '#aaa',
+    fontSize: 14,
+    color: Colors.textTertiary,
   },
 });

@@ -1,115 +1,89 @@
 /**
- * Translation proxy client.
- *
- * Calls the Cloudflare Worker proxy (or user's self-hosted proxy).
- * The proxy holds the API key server-side, so it's never exposed in the app.
+ * Translation service — DeepSeek API direct call.
  *
  * Architecture:
- *   App (this file) → Cloudflare Worker → DeepSeek/Baidu Translate API
- *                                     ↓
- *                              Cached in local SQLite
+ *   App → DeepSeek API (with user-provided API key)
+ *   Result cached in local SQLite keyed by (bookId, sentenceIndex).
+ *
+ * The app embeds a translation prompt instructing DeepSeek to produce
+ * natural Chinese translations of Japanese text.
  */
 
-const DEFAULT_PROXY_URL = 'https://jareader-proxy.example.workers.dev';
+const DEEPSEEK_API = 'https://api.deepseek.com/v1/chat/completions';
+
+const TRANSLATION_PROMPT =
+  '你是一个专业的日译中翻译助手。请将以下日语文本翻译成自然流畅的中文。\n' +
+  '要求：\n' +
+  '- 保持原文的语气和风格\n' +
+  '- 专有名词保留原文并括号标注中文\n' +
+  '- 只输出译文，不要解释\n\n' +
+  '日语原文：';
 
 interface TranslateOptions {
   text: string;
-  from?: string;
-  to?: string;
+  apiKey: string;
 }
 
 interface TranslateResult {
   original: string;
   translated: string;
-  provider: string;
 }
 
 /**
- * Translation client.
+ * Translation client — singleton.
  */
 class TranslationClient {
-  private proxyUrl: string = DEFAULT_PROXY_URL;
-
-  setProxyUrl(url: string) {
-    this.proxyUrl = url;
-  }
-
-  getProxyUrl(): string {
-    return this.proxyUrl;
-  }
-
   /**
-   * Translate a single sentence.
-   * The proxy expects: POST /translate { text, from, to }
+   * Translate a single sentence via DeepSeek API.
    */
   async translate(opts: TranslateOptions): Promise<TranslateResult> {
-    const { text, from = 'ja', to = 'zh' } = opts;
+    const { text, apiKey } = opts;
 
-    if (!text.trim()) {
-      return { original: text, translated: '', provider: 'none' };
+    if (!text.trim() || !apiKey.trim()) {
+      return { original: text, translated: '' };
     }
 
-    const response = await fetch(`${this.proxyUrl}/translate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, from, to }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000); // 20s timeout
 
-    if (!response.ok) {
-      throw new Error(`Translation failed: ${response.status}`);
+    try {
+      const response = await fetch(DEEPSEEK_API, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            { role: 'user', content: TRANSLATION_PROMPT + text },
+          ],
+          temperature: 0.3,
+          max_tokens: 1024,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        const msg = (errData as any)?.error?.message || `HTTP ${response.status}`;
+        throw new Error(`翻译请求失败: ${msg}`);
+      }
+
+      const data = await response.json();
+      const translated = data.choices?.[0]?.message?.content?.trim() || '';
+
+      return { original: text, translated };
+    } catch (err: any) {
+      clearTimeout(timeout);
+      if (err.name === 'AbortError') {
+        throw new Error('翻译请求超时，请检查网络');
+      }
+      throw err;
     }
-
-    const data = await response.json();
-    return {
-      original: text,
-      translated: data.translated || '',
-      provider: data.provider || 'unknown',
-    };
-  }
-
-  /**
-   * Batch translate multiple sentences.
-   */
-  async translateBatch(
-    texts: string[],
-    from = 'ja',
-    to = 'zh',
-  ): Promise<TranslateResult[]> {
-    const response = await fetch(`${this.proxyUrl}/translate-batch`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ texts, from, to }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Batch translation failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.results || [];
   }
 }
 
-// Export singleton
 export const translationClient = new TranslationClient();
-
-/**
- * Translation cache using local storage (simple key-value).
- * Can be upgraded to SQLite for persistence.
- */
-const cache = new Map<string, string>();
-
-export function getCachedTranslation(text: string): string | null {
-  return cache.get(text) ?? null;
-}
-
-export function setCachedTranslation(text: string, translation: string): void {
-  cache.set(text, translation);
-  // Limit cache size
-  if (cache.size > 5000) {
-    const keys = Array.from(cache.keys());
-    for (let i = 0; i < 1000; i++) {
-      cache.delete(keys[i]);
-    }
-  }
-}

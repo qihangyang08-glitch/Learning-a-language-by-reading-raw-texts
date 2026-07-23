@@ -9,7 +9,7 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen name="index" />
-      <Tabs.Screen name="settings" />
+      <Tabs.Screen name="settings" options={{ href: null }} />
     </Tabs>
   );
 }

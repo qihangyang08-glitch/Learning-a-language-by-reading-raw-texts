@@ -1,20 +1,21 @@
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { Colors } from '../../utils/constants';
 
 interface ImportButtonProps {
   onPress: () => void;
 }
 
 /**
- * Floating Action Button for importing books.
- * Positioned at bottom-right of the library screen.
+ * Minimal floating action button for importing books.
+ * Clean circle, no heavy shadow.
  */
 export function ImportButton({ onPress }: ImportButtonProps) {
   return (
     <TouchableOpacity
       style={styles.fab}
       onPress={onPress}
-      activeOpacity={0.8}
+      activeOpacity={0.7}
     >
       <Text style={styles.icon}>+</Text>
     </TouchableOpacity>
@@ -25,23 +26,23 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 20,
-    bottom: 24,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#4a90d9',
+    bottom: 28,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: Colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 6,
+    shadowColor: Colors.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   icon: {
-    fontSize: 28,
+    fontSize: 26,
     color: '#fff',
     fontWeight: '300',
-    lineHeight: 30,
+    lineHeight: 28,
   },
 });

@@ -4,12 +4,20 @@
   "main": "expo-router/entry",
   "scheme": "jareader",
   "dependencies": {
+    "@react-native-community/slider": "^5.2.0",
     "babel-preset-expo": "^57.0.3",
-    "expo": "~57.0.7",
+    "expo": "~57.0.8",
+    "expo-asset": "~57.0.7",
+    "expo-audio": "~57.0.3",
+    "expo-constants": "~57.0.7",
     "expo-document-picker": "~57.0.1",
     "expo-file-system": "~57.0.1",
-    "expo-router": "~57.0.7",
+    "expo-linking": "~57.0.4",
+    "expo-router": "~57.0.8",
+    "expo-screen-orientation": "~57.0.1",
+    "expo-secure-store": "^57.0.1",
     "expo-speech": "~57.0.1",
+    "expo-splash-screen": "~57.0.5",
     "expo-sqlite": "~57.0.1",
     "expo-status-bar": "~57.0.1",
     "jszip": "^3.10.1",
@@ -17,13 +25,15 @@
     "react-native": "0.86.0",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-reanimated": "4.5.0",
-    "react-native-safe-area-context": "~5.4.0",
+    "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "^4.26.2",
+    "react-native-worklets": "^0.10.0",
+    "tiny-segmenter": "^0.2.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "eas-cli": "^21.0.2",
+    "sql.js": "^1.14.1",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -31,6 +41,13 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web"
+  },
+  "expo": {
+    "doctor": {
+      "appConfigFieldsNotSyncedCheck": {
+        "enabled": false
+      }
+    }
   },
   "private": true
 }

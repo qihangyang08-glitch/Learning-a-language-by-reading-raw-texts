@@ -1,7 +1,7 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { BOOKS_DIR } from '../utils/constants';
 import type { BookFormat } from '../types/book';
-import { v4 as uuidv4 } from '../utils/uuid';
+import { uuidv4 as v4 } from '../utils/uuid';
 
 /**
  * Book storage service.
@@ -38,7 +38,7 @@ export class StorageService {
   ): Promise<{ filePath: string; bookId: string }> {
     await this.ensureDirectory();
 
-    const bookId = uuidv4();
+    const bookId = v4();
     const ext = fileName.split('.').pop() || format;
     const safeName = `${bookId}.${ext}`;
     const destPath = `${this.booksDir}${safeName}`;
