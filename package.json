@@ -1,6 +1,8 @@
 {
   "name": "learn-jareading-by-novel",
   "version": "1.0.0",
+  "description": "Android reader for Japanese novel reading practice with sentence-by-sentence study aids.",
+  "license": "MIT",
   "main": "expo-router/entry",
   "scheme": "jareader",
   "dependencies": {

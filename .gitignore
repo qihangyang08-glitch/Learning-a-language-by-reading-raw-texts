@@ -34,7 +34,17 @@ android/**/*.iml
 
 # IDE local state
 .idea/
+.vscode/
 .claude/
+CLAUDE.md
+ANDROID_STUDIO.md
+
+# Process notes / one-off reports
+docs/
+下一步的计划.md
+二轮重构分析.md
+*.tmp.md
+*-report.md
 
 # Generated native folders not used by this Android-first repo
 /ios
@@ -47,11 +57,12 @@ scripts/__pycache__/
 _disabled-kokoro/
 
 # Local dictionaries and imported novel sources
+assets/dictionary/*.db
 小学馆v3/
 小学館中日日中統合辞書第2版*/
+小学馆*/
 *.epub
 *.txt
-!docs/**/*.txt
 
 # Release artifacts and archives
 *.apk

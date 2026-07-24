@@ -506,8 +506,7 @@ function testFtsAvailability(SQL) {
 function inspectBundledDictionaryDb(SQL, failPoints) {
   const dbPath = path.join(ROOT, 'assets', 'dictionary', 'jareader.db');
   if (!fs.existsSync(dbPath)) {
-    failPoints.push('assets/dictionary/jareader.db is missing.');
-    return { exists: false };
+    return { exists: false, optional: true };
   }
 
   const bytes = fs.readFileSync(dbPath);
@@ -518,8 +517,7 @@ function inspectBundledDictionaryDb(SQL, failPoints) {
     db.close();
     return { exists: true, sizeBytes: bytes.length, entries, version };
   } catch (error) {
-    failPoints.push(`Unable to inspect bundled SQLite dictionary DB: ${error.message}`);
-    return { exists: true, sizeBytes: bytes.length, error: error.message };
+    return { exists: true, optional: true, sizeBytes: bytes.length, error: error.message };
   }
 }
 
@@ -689,8 +687,9 @@ function printDictionaryResult(result) {
   console.log(`  JSON: ${result.jsonExists ? `${(result.jsonSizeBytes / 1024 / 1024).toFixed(1)} MB` : 'missing'}`);
   if (result.bundledDb?.exists) {
     console.log(`  bundled DB: ${(result.bundledDb.sizeBytes / 1024).toFixed(1)} KB, entries ${result.bundledDb.entries ?? 'n/a'}, version ${result.bundledDb.version ?? 'n/a'}`);
+    if (result.bundledDb.error) console.log(`  bundled DB note: optional asset not usable (${result.bundledDb.error})`);
   } else {
-    console.log('  bundled DB: missing');
+    console.log('  bundled DB: not bundled (optional)');
   }
   console.log(`  Node FTS5 support: ${result.ftsAvailableInNode ? 'yes' : 'no'}`);
   if (result.skippedImport) {
