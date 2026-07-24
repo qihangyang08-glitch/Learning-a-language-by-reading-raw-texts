@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import Animated, { FadeIn, FadeOut, SlideOutUp } from 'react-native-reanimated';
 import { Colors } from '../../utils/constants';
+import type { TranslationDisplayState } from '../../store/readerStore';
 
 interface DictResultItem {
   word: string;
@@ -29,6 +30,8 @@ interface NotebookCardProps {
   translation?: string | null;
   /** Translation loading state */
   translationLoading?: boolean;
+  /** hidden/current/stale translation display state */
+  translationState?: TranslationDisplayState;
   /** Dismiss handler — taps outside card are caught by parent */
   onDismiss: () => void;
 }
@@ -52,9 +55,11 @@ export function NotebookCard({
   queryWord,
   translation,
   translationLoading,
+  translationState = 'hidden',
 }: NotebookCardProps) {
   const { height } = useWindowDimensions();
   const maxH = height * 0.38;
+  const isStaleTranslation = translationState === 'stale';
 
   // ── Nothing to show ──
   const hasDict = !!(dictResult || (dictResults && dictResults.length > 0));
@@ -97,7 +102,7 @@ export function NotebookCard({
           <>
             <Text style={styles.label}>译文</Text>
             {translation.split('\n').filter(Boolean).map((line, i) => (
-              <Text key={i} style={styles.line}>
+              <Text key={i} style={[styles.line, isStaleTranslation && styles.staleLine]}>
                 {line}
               </Text>
             ))}
@@ -177,6 +182,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#e8e0cc',
     paddingBottom: 2,
+  },
+  staleLine: {
+    color: '#776b5f',
   },
   loadingRow: {
     flexDirection: 'row',

@@ -40,7 +40,10 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "android:debug": "cd android && gradlew.bat :app:assembleDebug",
+    "assets:android": "powershell -ExecutionPolicy Bypass -File scripts\\generate-app-assets.ps1"
   },
   "expo": {
     "doctor": {

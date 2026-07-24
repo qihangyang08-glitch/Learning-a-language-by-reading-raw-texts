@@ -1,23 +1,15 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
-# dependencies
+# Dependencies
 node_modules/
 
-# Expo
+# Expo / Metro
 .expo/
 .dict-tmp/
 dist/
 web-build/
 expo-env.d.ts
+.metro-health-check*
 
-# Native
-.kotlin/
-*.orig.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
+# Android local state and build output
 android/.gradle/
 android/.idea/
 android/.kotlin/
@@ -25,39 +17,51 @@ android/build/
 android/app/build/
 android/app/.cxx/
 android/local.properties
+android/**/*.hprof
+android/**/*.iml
 
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# macOS
-.DS_Store
+# Native signing / provisioning
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
 *.pem
 
-# local env files
+# Local env files
 .env*.local
+
+# IDE local state
+.idea/
+.claude/
+
+# Generated native folders not used by this Android-first repo
+/ios
+
+# Local servers / generated media
 edge-tts-server/.venv/
 edge-tts-server/*.mp3
 edge-tts-server/__pycache__/
 scripts/__pycache__/
 _disabled-kokoro/
-小学館中日日中統合辞書第2版 有附录/
+
+# Local dictionaries and imported novel sources
 小学馆v3/
+小学館中日日中統合辞書第2版*/
 *.epub
+*.txt
+!docs/**/*.txt
+
+# Release artifacts and archives
+*.apk
+*.zip
+
+# Local images not required by the app bundle
 assets/*.jpg
 logo.*
 
-# typescript
+# OS / TypeScript
+.DS_Store
+Thumbs.db
 *.tsbuildinfo
-
-# generated native folders
-/ios
-
-# IDE
-.idea/
-*.apk
-*.zip

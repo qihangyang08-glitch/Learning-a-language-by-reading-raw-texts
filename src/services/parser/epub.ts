@@ -273,6 +273,8 @@ export class EpubParser implements BookParser {
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
 
+    text = this.simplifyRubyTags(text);
+
     // Replace <img> tags with a visible marker
     text = text.replace(/<img[^>]*\/?>/gi, '【插图】');
     text = text.replace(/<image[^>]*\/?>/gi, '【插图】');
@@ -294,6 +296,37 @@ export class EpubParser implements BookParser {
     text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 
     return { text, isVertical, images };
+  }
+
+  private simplifyRubyTags(html: string): string {
+    return html.replace(/<ruby\b[^>]*>([\s\S]*?)<\/ruby>/gi, (_match, inner: string) => {
+      const rbText = this.extractRubyBaseText(inner);
+      if (rbText) return rbText;
+
+      return this.stripHtmlTags(
+        inner
+          .replace(/<rtc\b[^>]*>[\s\S]*?<\/rtc>/gi, '')
+          .replace(/<rt\b[^>]*>[\s\S]*?<\/rt>/gi, '')
+          .replace(/<rp\b[^>]*>[\s\S]*?<\/rp>/gi, ''),
+      );
+    });
+  }
+
+  private extractRubyBaseText(inner: string): string {
+    const parts: string[] = [];
+    const rbRegex = /<rb\b[^>]*>([\s\S]*?)<\/rb>/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = rbRegex.exec(inner)) !== null) {
+      const text = this.stripHtmlTags(match[1]);
+      if (text) parts.push(text);
+    }
+
+    return parts.join('');
+  }
+
+  private stripHtmlTags(fragment: string): string {
+    return fragment.replace(/<[^>]*>/g, '');
   }
 
   /**

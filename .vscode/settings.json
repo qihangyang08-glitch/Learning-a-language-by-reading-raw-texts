@@ -1,5 +1,10 @@
 {
-  // VS Code is used for editing only — builds happen in Android Studio
+  // VS Code is used for source editing only; Android Studio owns Gradle sync/builds.
+  "files.encoding": "utf8",
+  "files.eol": "\n",
+  "editor.detectIndentation": false,
+  "editor.insertSpaces": true,
+  "editor.tabSize": 2,
   "java.configuration.updateBuildConfiguration": "disabled",
   "java.autobuild.enabled": false,
   "java.import.gradle.enabled": false,

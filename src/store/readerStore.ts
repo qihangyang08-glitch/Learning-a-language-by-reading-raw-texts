@@ -1,7 +1,34 @@
 import { create } from 'zustand';
 import type { Sentence } from '../types/book';
+import type { RomajiResult } from '../services/romaji';
 import type { HandMode } from '../utils/constants';
 import { DEFAULT_FONT_SIZE } from '../utils/constants';
+
+export type TranslationDisplayState = 'hidden' | 'current' | 'stale';
+export type RomajiDisplayState = 'hidden' | 'loading' | 'current' | 'stale' | 'error';
+
+function getTranslationState(
+  visible: boolean,
+  sentenceIndex: number | null,
+  currentIndex: number,
+): TranslationDisplayState {
+  if (!visible || sentenceIndex === null) return 'hidden';
+  return sentenceIndex === currentIndex ? 'current' : 'stale';
+}
+
+function getRomajiState(
+  visible: boolean,
+  sentenceIndex: number | null,
+  currentIndex: number,
+  loading: boolean,
+  error: string | null,
+): RomajiDisplayState {
+  if (!visible || sentenceIndex === null) return 'hidden';
+  if (sentenceIndex !== currentIndex) return 'stale';
+  if (loading) return 'loading';
+  if (error) return 'error';
+  return 'current';
+}
 
 interface ReaderStoreState {
   // Book identity
@@ -34,10 +61,20 @@ interface ReaderStoreState {
   showResult: boolean;
 
   // Translation
+  translationState: TranslationDisplayState;
+  translationSentenceIndex: number | null;
   currentTranslation: string | null;
   translationLoading: boolean;
   /** Pre-loaded cached translations for current window (sentenceIndex → text) */
   translationCache: Map<number, string>;
+
+  // Romaji annotation
+  romajiState: RomajiDisplayState;
+  romajiSentenceIndex: number | null;
+  currentRomaji: RomajiResult | null;
+  romajiLoading: boolean;
+  romajiError: string | null;
+  romajiCache: Map<string, RomajiResult>;
 
   // Actions
   openBook: (bookId: string, sentences: Sentence[], total: number, chapterImages?: Record<number, any[]>, translationCache?: Map<number, string>) => void;
@@ -51,11 +88,15 @@ interface ReaderStoreState {
   setLineHeight: (height: number) => void;
   setLandscape: (landscape: boolean) => void;
   toggleTranslation: () => void;
+  hideTranslation: () => void;
   setIsReading: (reading: boolean) => void;
   showLookupResult: (word: string, result: any, allResults?: any[]) => void;
   hideLookupResult: () => void;
-  setTranslation: (translation: string | null, loading: boolean) => void;
+  setTranslation: (translation: string | null, loading: boolean, sentenceIndex?: number) => void;
   mergeTranslationCache: (cache: Map<number, string>) => void;
+  setRomaji: (romaji: RomajiResult | null, loading: boolean, sentenceIndex?: number, error?: string | null) => void;
+  hideRomaji: () => void;
+  mergeRomajiCache: (cache: Map<string, RomajiResult>) => void;
 }
 
 export const useReaderStore = create<ReaderStoreState>((set, get) => ({
@@ -75,9 +116,17 @@ export const useReaderStore = create<ReaderStoreState>((set, get) => ({
   lookupResult: null,
   lookupResults: [],
   showResult: false,
+  translationState: 'hidden',
+  translationSentenceIndex: null,
   currentTranslation: null,
   translationLoading: false,
   translationCache: new Map(),
+  romajiState: 'hidden',
+  romajiSentenceIndex: null,
+  currentRomaji: null,
+  romajiLoading: false,
+  romajiError: null,
+  romajiCache: new Map(),
 
   openBook: (bookId, sentences, total, chapterImages = {}, translationCache) =>
     set({
@@ -88,10 +137,19 @@ export const useReaderStore = create<ReaderStoreState>((set, get) => ({
       totalSentences: total,
       windowBase: 0,
       showResult: false,
+      showTranslation: false,
+      translationState: 'hidden',
+      translationSentenceIndex: null,
       currentTranslation: null,
       translationLoading: false,
       lookupResults: [],
       translationCache: translationCache ?? new Map(),
+      romajiState: 'hidden',
+      romajiSentenceIndex: null,
+      currentRomaji: null,
+      romajiLoading: false,
+      romajiError: null,
+      romajiCache: new Map(),
     }),
 
   appendWindow: (sentences, base, translationCache) =>
@@ -120,7 +178,18 @@ export const useReaderStore = create<ReaderStoreState>((set, get) => ({
       windowBase: 0,
       showResult: false,
       isReading: false,
+      showTranslation: false,
+      translationState: 'hidden',
+      translationSentenceIndex: null,
+      currentTranslation: null,
+      translationLoading: false,
       translationCache: new Map(),
+      romajiState: 'hidden',
+      romajiSentenceIndex: null,
+      currentRomaji: null,
+      romajiLoading: false,
+      romajiError: null,
+      romajiCache: new Map(),
     }),
 
   goToSentence: (index) => {
@@ -128,40 +197,56 @@ export const useReaderStore = create<ReaderStoreState>((set, get) => ({
     const total = state.totalSentences;
     const clamped = Math.max(0, Math.min(index, total - 1));
 
-    // Auto-populate translation from cache if available
-    const cached = state.translationCache.get(clamped);
     set({
-      currentIndex: clamped,
-      showResult: false,
-      currentTranslation: cached ?? null,
-      showTranslation: !!cached,
-    });
+        currentIndex: clamped,
+        showResult: false,
+        translationState: getTranslationState(state.showTranslation, state.translationSentenceIndex, clamped),
+        romajiState: getRomajiState(
+          state.romajiState !== 'hidden',
+          state.romajiSentenceIndex,
+          clamped,
+          state.romajiLoading,
+          state.romajiError,
+        ),
+      });
   },
 
   nextSentence: () => {
-    const { currentIndex, totalSentences, translationCache } = get();
+    const state = get();
+    const { currentIndex, totalSentences } = state;
     if (currentIndex < totalSentences - 1) {
       const next = currentIndex + 1;
-      const cached = translationCache.get(next);
       set({
         currentIndex: next,
         showResult: false,
-        currentTranslation: cached ?? null,
-        showTranslation: !!cached,
+        translationState: getTranslationState(state.showTranslation, state.translationSentenceIndex, next),
+        romajiState: getRomajiState(
+          state.romajiState !== 'hidden',
+          state.romajiSentenceIndex,
+          next,
+          state.romajiLoading,
+          state.romajiError,
+        ),
       });
     }
   },
 
   prevSentence: () => {
-    const { currentIndex, translationCache } = get();
+    const state = get();
+    const { currentIndex } = state;
     if (currentIndex > 0) {
       const prev = currentIndex - 1;
-      const cached = translationCache.get(prev);
       set({
         currentIndex: prev,
         showResult: false,
-        currentTranslation: cached ?? null,
-        showTranslation: !!cached,
+        translationState: getTranslationState(state.showTranslation, state.translationSentenceIndex, prev),
+        romajiState: getRomajiState(
+          state.romajiState !== 'hidden',
+          state.romajiSentenceIndex,
+          prev,
+          state.romajiLoading,
+          state.romajiError,
+        ),
       });
     }
   },
@@ -170,11 +255,54 @@ export const useReaderStore = create<ReaderStoreState>((set, get) => ({
   setFontSize: (fontSize) => set({ fontSize }),
   setLineHeight: (lineHeight) => set({ lineHeight }),
   setLandscape: (isLandscape) => set({ isLandscape }),
-  toggleTranslation: () => set((s) => ({ showTranslation: !s.showTranslation })),
+  toggleTranslation: () => set((s) => {
+    if (s.translationState === 'current') {
+      return {
+        showTranslation: false,
+        translationState: 'hidden',
+        translationSentenceIndex: null,
+        currentTranslation: null,
+        translationLoading: false,
+      };
+    }
+
+    return {
+      showTranslation: true,
+      translationState: 'current',
+      translationSentenceIndex: s.currentIndex,
+      currentTranslation: null,
+      translationLoading: false,
+    };
+  }),
+  hideTranslation: () =>
+    set({
+      showTranslation: false,
+      translationState: 'hidden',
+      translationSentenceIndex: null,
+      currentTranslation: null,
+      translationLoading: false,
+    }),
+  hideRomaji: () =>
+    set({
+      romajiState: 'hidden',
+      romajiSentenceIndex: null,
+      currentRomaji: null,
+      romajiLoading: false,
+      romajiError: null,
+    }),
   setIsReading: (isReading) => set({ isReading }),
 
-  setTranslation: (currentTranslation, translationLoading) =>
-    set({ currentTranslation, translationLoading }),
+  setTranslation: (currentTranslation, translationLoading, sentenceIndex) =>
+    set((s) => {
+      const targetIndex = sentenceIndex ?? s.translationSentenceIndex ?? s.currentIndex;
+      return {
+        showTranslation: true,
+        translationState: getTranslationState(true, targetIndex, s.currentIndex),
+        translationSentenceIndex: targetIndex,
+        currentTranslation,
+        translationLoading,
+      };
+    }),
 
   showLookupResult: (selectedWord, lookupResult, lookupResults = []) =>
     set({ selectedWord, lookupResult, lookupResults, showResult: true }),
@@ -187,5 +315,24 @@ export const useReaderStore = create<ReaderStoreState>((set, get) => ({
       const merged = new Map(s.translationCache);
       for (const [k, v] of cache) merged.set(k, v);
       return { translationCache: merged };
+    }),
+
+  setRomaji: (currentRomaji, romajiLoading, sentenceIndex, error = null) =>
+    set((s) => {
+      const targetIndex = sentenceIndex ?? s.romajiSentenceIndex ?? s.currentIndex;
+      return {
+        romajiState: getRomajiState(true, targetIndex, s.currentIndex, romajiLoading, error),
+        romajiSentenceIndex: targetIndex,
+        currentRomaji,
+        romajiLoading,
+        romajiError: error,
+      };
+    }),
+
+  mergeRomajiCache: (cache) =>
+    set((s) => {
+      const merged = new Map(s.romajiCache);
+      for (const [k, v] of cache) merged.set(k, v);
+      return { romajiCache: merged };
     }),
 }));

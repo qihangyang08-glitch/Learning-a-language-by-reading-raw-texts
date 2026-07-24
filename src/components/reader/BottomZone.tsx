@@ -17,6 +17,8 @@ interface BottomZoneProps {
   handMode: HandMode;
   isReading: boolean;
   showTranslation: boolean;
+  showRomaji?: boolean;
+  romajiLoading?: boolean;
   isFirst: boolean;
   isLast: boolean;
   isLandscape: boolean;
@@ -24,6 +26,7 @@ interface BottomZoneProps {
   onNext: () => void;
   onTtsToggle: () => void;
   onTranslationToggle: () => void;
+  onRomajiToggle?: () => void;
 }
 
 /**
@@ -46,6 +49,8 @@ export function BottomZone({
   handMode,
   isReading,
   showTranslation,
+  showRomaji = false,
+  romajiLoading = false,
   isFirst,
   isLast,
   isLandscape,
@@ -53,6 +58,7 @@ export function BottomZone({
   onNext,
   onTtsToggle,
   onTranslationToggle,
+  onRomajiToggle,
 }: BottomZoneProps) {
   const translateX = useSharedValue(0);
   const opacity = useSharedValue(1);
@@ -162,6 +168,17 @@ export function BottomZone({
               active={showTranslation}
               isLabel
             />
+            {onRomajiToggle && (
+              <>
+                <View style={{ height: 8 }} />
+                <Btn
+                  icon={romajiLoading ? '...' : '音'}
+                  onPress={onRomajiToggle}
+                  active={showRomaji}
+                  isLabel
+                />
+              </>
+            )}
             <View style={{ height: 8 }} />
             <Btn icon="→" onPress={onNext} />
           </View>
@@ -191,6 +208,17 @@ export function BottomZone({
                 active={showTranslation}
                 isLabel
               />
+              {onRomajiToggle && (
+                <>
+                  <View style={{ width: 14 }} />
+                  <Btn
+                    icon={romajiLoading ? '...' : '音'}
+                    onPress={onRomajiToggle}
+                    active={showRomaji}
+                    isLabel
+                  />
+                </>
+              )}
             </View>
             <Btn icon="→" onPress={onNext} />
           </View>
@@ -230,6 +258,17 @@ export function BottomZone({
                 active={showTranslation}
                 isLabel
               />
+              {onRomajiToggle && (
+                <>
+                  <View style={{ width: 10 }} />
+                  <Btn
+                    icon={romajiLoading ? '...' : '音'}
+                    onPress={onRomajiToggle}
+                    active={showRomaji}
+                    isLabel
+                  />
+                </>
+              )}
             </View>
             {/* Row 3: → (at edge — easiest thumb reach) */}
             <View style={styles.staggerGroup}>
@@ -252,6 +291,17 @@ export function BottomZone({
                 active={showTranslation}
                 isLabel
               />
+              {onRomajiToggle && (
+                <>
+                  <View style={{ width: 18 }} />
+                  <Btn
+                    icon={romajiLoading ? '...' : '音'}
+                    onPress={onRomajiToggle}
+                    active={showRomaji}
+                    isLabel
+                  />
+                </>
+              )}
             </View>
             <Btn icon="→" onPress={onNext} />
           </View>

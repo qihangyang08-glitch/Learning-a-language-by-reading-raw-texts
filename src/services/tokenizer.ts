@@ -1,5 +1,48 @@
 import type { Token } from '../types/book';
 
+export function getTokenEnd(token: Token): number {
+  return token.wordPosition + token.surfaceForm.length;
+}
+
+export function findTokenIndexAtChar(tokens: Token[], charIndex: number): number | null {
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (charIndex >= token.wordPosition && charIndex < getTokenEnd(token)) return i;
+  }
+  return null;
+}
+
+export function getTokensOverlappingRange(
+  tokens: Token[],
+  start: number,
+  endExclusive: number,
+): Token[] {
+  return tokens.filter(
+    (token) => token.wordPosition < endExclusive && getTokenEnd(token) > start,
+  );
+}
+
+export function createTextRangeToken(
+  text: string,
+  start: number,
+  endExclusive: number,
+  sourceTokens: Token[] = [],
+): Token {
+  const safeStart = Math.max(0, Math.min(start, text.length));
+  const safeEnd = Math.max(safeStart, Math.min(endExclusive, text.length));
+  const surfaceForm = text.slice(safeStart, safeEnd);
+  const readings = sourceTokens.map((token) => token.reading).filter(Boolean);
+  const pos = [...new Set(sourceTokens.map((token) => token.pos).filter(Boolean))];
+
+  return {
+    surfaceForm,
+    reading: readings.join(''),
+    baseForm: surfaceForm,
+    pos: pos.join(',') || '選択',
+    wordPosition: safeStart,
+  };
+}
+
 /**
  * Japanese text tokenizer service.
  *

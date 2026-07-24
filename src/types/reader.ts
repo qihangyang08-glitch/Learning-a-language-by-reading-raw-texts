@@ -3,6 +3,9 @@
 import type { HandMode } from '../utils/constants';
 import type { Sentence } from './book';
 
+/** Romaji annotation layout mode */
+export type RomajiLayoutMode = 'phrase' | 'token';
+
 /** Reader screen state */
 export interface ReaderState {
   bookId: string;
@@ -12,6 +15,8 @@ export interface ReaderState {
   handMode: HandMode;
   isReading: boolean;       // TTS active
   showTranslation: boolean;
+  translationState?: 'hidden' | 'current' | 'stale';
+  translationSentenceIndex?: number | null;
   fontSize: number;
   lineHeight: number;
 }

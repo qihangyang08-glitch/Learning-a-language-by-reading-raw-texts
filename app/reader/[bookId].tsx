@@ -33,10 +33,14 @@ import {
   loadBookmarks,
   addBookmark,
   removeBookmark,
+  getCachedTranslation,
   getCachedTranslations,
   setCachedTranslation,
+  getCachedRomaji,
+  setCachedRomaji,
   updateProgress as persistProgress,
 } from '../../src/services/bookshelf';
+import { createSourceTextHash, romajiClient } from '../../src/services/romaji';
 import { Colors } from '../../src/utils/constants';
 import type { Token } from '../../src/types/book';
 
@@ -49,7 +53,7 @@ export default function ReaderScreen() {
 
   const { books, updateProgress } = useBookStore();
   const reader = useReaderStore();
-  const { translationApiKey, manualOrientation } = useSettingsStore();
+  const { translationApiKey, manualOrientation, romajiLayoutMode } = useSettingsStore();
 
   const [showNav, setShowNav] = useState(false);
   const [bookmarks, setBookmarks] = useState<Set<number>>(new Set());
@@ -59,9 +63,8 @@ export default function ReaderScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dictEntries, setDictEntries] = useState(() => getEntryCount());
 
-  const translationLockRef = useRef(false);
-  const translateTargetRef = useRef<{ text: string; index: number } | null>(null);
-  const [translateTrigger, setTranslateTrigger] = useState(0);
+  const translationRequestIdRef = useRef(0);
+  const romajiRequestIdRef = useRef(0);
 
   const book = useMemo(() => books.find((b) => b.id === bookId), [books, bookId]);
 
@@ -194,45 +197,144 @@ export default function ReaderScreen() {
     } catch { return currentSentence; }
   }, [currentSentence, tokState]);
 
-  // ── Translation (latch mode) ──
-  useEffect(() => {
-    if (!reader.showTranslation || !translationApiKey || translateTrigger === 0) return;
-    const target = translateTargetRef.current;
-    if (!target || !reader.bookId) return;
+  const handleTranslationToggle = useCallback(() => {
+    const bookId = reader.bookId;
+    if (!bookId || !currentSentence) return;
 
-    // Check the in-memory translation cache first (populated on open/window-reload)
+    const target = { text: currentSentence.text, index: currentSentence.index };
+    if (reader.translationState === 'current' && reader.translationSentenceIndex === target.index) {
+      translationRequestIdRef.current += 1;
+      reader.hideTranslation();
+      return;
+    }
+
     const memCached = reader.translationCache.get(target.index);
-    if (memCached) { reader.setTranslation(memCached, false); return; }
+    if (memCached) {
+      reader.setTranslation(memCached, false, target.index);
+      return;
+    }
 
-    let cancelled = false;
+    const diskCached = getCachedTranslation(bookId, target.index);
+    if (diskCached) {
+      reader.mergeTranslationCache(new Map([[target.index, diskCached]]));
+      reader.setTranslation(diskCached, false, target.index);
+      return;
+    }
+
+    if (!translationApiKey) {
+      reader.setTranslation('未配置翻译 API Key', false, target.index);
+      return;
+    }
+
+    const requestId = translationRequestIdRef.current + 1;
+    translationRequestIdRef.current = requestId;
+    reader.setTranslation(null, true, target.index);
+
     let retries = 0;
-
     const attempt = async () => {
-      reader.setTranslation(null, true);
-      translationLockRef.current = true;
       try {
         const result = await translationClient.translate({ text: target.text, apiKey: translationApiKey });
-        if (cancelled) return;
-        // Persist to DB and update in-memory cache
-        setCachedTranslation(reader.bookId!, target.index, result.translated);
-        const entry = new Map([[target.index, result.translated]]);
-        reader.mergeTranslationCache(entry);
-        reader.setTranslation(result.translated, false);
+        if (translationRequestIdRef.current !== requestId) return;
+        const visibleTarget = useReaderStore.getState().translationSentenceIndex;
+        if (visibleTarget !== target.index) return;
+
+        setCachedTranslation(bookId, target.index, result.translated);
+        reader.mergeTranslationCache(new Map([[target.index, result.translated]]));
+        reader.setTranslation(result.translated, false, target.index);
       } catch (err: any) {
-        if (cancelled) return;
-        if (retries < 2) { retries++; setTimeout(() => { if (!cancelled) attempt(); }, 1000); }
-        else reader.setTranslation(err?.message || '翻译服务不可用', false);
-      } finally {
-        if (!cancelled) translationLockRef.current = false;
+        if (translationRequestIdRef.current !== requestId) return;
+        const visibleTarget = useReaderStore.getState().translationSentenceIndex;
+        if (visibleTarget !== target.index) return;
+
+        if (retries < 2) {
+          retries += 1;
+          setTimeout(() => { attempt(); }, 1000);
+        } else {
+          reader.setTranslation(err?.message || '翻译服务不可用', false, target.index);
+        }
       }
     };
     attempt();
-    return () => { cancelled = true; };
-  }, [translateTrigger]);
+  }, [
+    currentSentence,
+    reader.bookId,
+    reader.translationState,
+    reader.translationSentenceIndex,
+    reader.translationCache,
+    translationApiKey,
+  ]);
 
-  useEffect(() => {
-    if (!reader.showTranslation) reader.setTranslation(null, false);
-  }, [reader.showTranslation]);
+  const handleRomajiToggle = useCallback(() => {
+    const bookId = reader.bookId;
+    if (!bookId || !currentSentence) return;
+
+    const target = {
+      text: currentSentence.text,
+      index: currentSentence.index,
+      hash: createSourceTextHash(`${romajiLayoutMode}:${currentSentence.text}`),
+    };
+    const cacheKey = `${target.index}:${target.hash}`;
+
+    if (reader.romajiState !== 'hidden' && reader.romajiSentenceIndex === target.index) {
+      romajiRequestIdRef.current += 1;
+      reader.hideRomaji();
+      return;
+    }
+
+    const memCached = reader.romajiCache.get(cacheKey);
+    if (memCached) {
+      reader.setRomaji(memCached, false, target.index);
+      return;
+    }
+
+    const diskCached = getCachedRomaji(bookId, target.index, target.hash);
+    if (diskCached) {
+      reader.mergeRomajiCache(new Map([[cacheKey, diskCached]]));
+      reader.setRomaji(diskCached, false, target.index);
+      return;
+    }
+
+    if (!translationApiKey) {
+      reader.setRomaji(null, false, target.index, '未配置 DeepSeek API Key');
+      return;
+    }
+
+    const requestId = romajiRequestIdRef.current + 1;
+    romajiRequestIdRef.current = requestId;
+    reader.setRomaji(null, true, target.index);
+
+    const attempt = async () => {
+      try {
+        const result = await romajiClient.generate({
+          text: target.text,
+          apiKey: translationApiKey,
+          layoutMode: romajiLayoutMode,
+        });
+        if (romajiRequestIdRef.current !== requestId) return;
+
+        setCachedRomaji(bookId, target.index, target.hash, result);
+        reader.mergeRomajiCache(new Map([[cacheKey, result]]));
+
+        const visibleTarget = useReaderStore.getState().romajiSentenceIndex;
+        if (visibleTarget !== target.index) return;
+        reader.setRomaji(result, false, target.index);
+      } catch (err: any) {
+        if (romajiRequestIdRef.current !== requestId) return;
+        const visibleTarget = useReaderStore.getState().romajiSentenceIndex;
+        if (visibleTarget !== target.index) return;
+        reader.setRomaji(null, false, target.index, err?.message || '罗马音服务不可用');
+      }
+    };
+    attempt();
+  }, [
+    currentSentence,
+    reader.bookId,
+    reader.romajiCache,
+    reader.romajiSentenceIndex,
+    reader.romajiState,
+    romajiLayoutMode,
+    translationApiKey,
+  ]);
 
   // ── Handlers ──
 
@@ -287,7 +389,7 @@ export default function ReaderScreen() {
 
   const handleDismissCard = useCallback(() => {
     reader.hideLookupResult();
-    if (reader.showTranslation) reader.toggleTranslation();
+    reader.hideTranslation();
   }, []);
 
   // Dismiss gesture: only fires on a quick tap (<400ms, <8px movement).
@@ -351,7 +453,10 @@ export default function ReaderScreen() {
       if (!reader.bookId) return;
       const newWindow = loadSentenceWindow(reader.bookId, safeIndex);
       if (newWindow.length > 0) {
-        reader.appendWindow(newWindow, Math.max(0, safeIndex - 50));
+        const fromIdx = newWindow[0].index;
+        const toIdx = newWindow[newWindow.length - 1].index;
+        const translationCache = getCachedTranslations(reader.bookId, fromIdx, toIdx);
+        reader.appendWindow(newWindow, Math.max(0, safeIndex - 50), translationCache);
         setTimeout(() => reader.goToSentence(safeIndex), 0);
       }
       setShowNav(false);
@@ -359,10 +464,10 @@ export default function ReaderScreen() {
   }, [reader.bookId, reader.totalSentences]);
 
   const handlePrev = useCallback(() => {
-    if (!translationLockRef.current) reader.prevSentence();
+    reader.prevSentence();
   }, []);
   const handleNext = useCallback(() => {
-    if (!translationLockRef.current) reader.nextSentence();
+    reader.nextSentence();
   }, []);
 
   const toggleBookmark = useCallback(() => {
@@ -379,8 +484,14 @@ export default function ReaderScreen() {
     ? Math.round(((reader.currentIndex + 1) / reader.totalSentences) * 100)
     : 0;
 
+  const translationVisible = reader.translationState !== 'hidden';
+  const currentTranslationVisible = reader.translationState === 'current';
+  const romajiVisibleForCurrent =
+    reader.romajiState === 'current' ||
+    reader.romajiState === 'loading' ||
+    reader.romajiState === 'error';
   // Is anything shown in the notebook card?
-  const showNotebook = reader.showResult || reader.showTranslation;
+  const showNotebook = reader.showResult || translationVisible;
 
   const isSingle = reader.handMode === 'left' || reader.handMode === 'right';
   const isRight = reader.handMode === 'right';
@@ -422,8 +533,9 @@ export default function ReaderScreen() {
               dictResult={reader.showResult ? reader.lookupResult : null}
               dictResults={reader.lookupResults}
               queryWord={reader.selectedWord}
-              translation={reader.showTranslation ? reader.currentTranslation : null}
+              translation={translationVisible ? reader.currentTranslation : null}
               translationLoading={reader.translationLoading}
+              translationState={reader.translationState}
               onDismiss={handleDismissCard}
             />
           </View>
@@ -435,24 +547,21 @@ export default function ReaderScreen() {
         <View style={styles.landscapeRow}>
           {/* Sidebar on the hand side (fixed width, full height) */}
           {!isRight && (
-            <BottomZone
-              handMode={reader.handMode}
-              isReading={ttsState === 'speaking'}
-              showTranslation={reader.showTranslation}
-              isFirst={reader.currentIndex <= 0}
-              isLast={reader.currentIndex >= reader.totalSentences - 1}
-              isLandscape={true}
-              onPrev={handlePrev}
-              onNext={handleNext}
-              onTtsToggle={handleTtsToggle}
-              onTranslationToggle={() => {
-                if (!reader.showTranslation && currentSentence) {
-                  translateTargetRef.current = { text: currentSentence.text, index: currentSentence.index };
-                  setTranslateTrigger(n => n + 1);
-                }
-                reader.toggleTranslation();
-              }}
-            />
+              <BottomZone
+                handMode={reader.handMode}
+                isReading={ttsState === 'speaking'}
+                showTranslation={currentTranslationVisible}
+                showRomaji={romajiVisibleForCurrent}
+                romajiLoading={reader.romajiState === 'loading'}
+                isFirst={reader.currentIndex <= 0}
+                isLast={reader.currentIndex >= reader.totalSentences - 1}
+                isLandscape={true}
+                onPrev={handlePrev}
+                onNext={handleNext}
+                onTtsToggle={handleTtsToggle}
+                onTranslationToggle={handleTranslationToggle}
+                onRomajiToggle={handleRomajiToggle}
+              />
           )}
 
           {/* Right area: scrollable, contains translation + text stacked vertically */}
@@ -470,8 +579,9 @@ export default function ReaderScreen() {
                     dictResult={reader.showResult ? reader.lookupResult : null}
                     dictResults={reader.lookupResults}
                     queryWord={reader.selectedWord}
-                    translation={reader.showTranslation ? reader.currentTranslation : null}
+                    translation={translationVisible ? reader.currentTranslation : null}
                     translationLoading={reader.translationLoading}
+                    translationState={reader.translationState}
                     onDismiss={handleDismissCard}
                   />
                 </View>
@@ -503,6 +613,10 @@ export default function ReaderScreen() {
                     handMode={reader.handMode}
                     hasImage={hasChapterImage}
                     chapterImages={reader.chapterImages[currentChapterIndex] || []}
+                    romaji={reader.currentRomaji}
+                    romajiState={reader.romajiState}
+                    romajiError={reader.romajiError}
+                    romajiLayoutMode={romajiLayoutMode}
                     onWordPress={handleWordPress}
                     onRangeSelect={handleRangeSelect}
                   />
@@ -516,20 +630,17 @@ export default function ReaderScreen() {
             <BottomZone
               handMode={reader.handMode}
               isReading={ttsState === 'speaking'}
-              showTranslation={reader.showTranslation}
+              showTranslation={currentTranslationVisible}
+              showRomaji={romajiVisibleForCurrent}
+              romajiLoading={reader.romajiState === 'loading'}
               isFirst={reader.currentIndex <= 0}
               isLast={reader.currentIndex >= reader.totalSentences - 1}
               isLandscape={true}
               onPrev={handlePrev}
               onNext={handleNext}
               onTtsToggle={handleTtsToggle}
-              onTranslationToggle={() => {
-                if (!reader.showTranslation && currentSentence) {
-                  translateTargetRef.current = { text: currentSentence.text, index: currentSentence.index };
-                  setTranslateTrigger(n => n + 1);
-                }
-                reader.toggleTranslation();
-              }}
+              onTranslationToggle={handleTranslationToggle}
+              onRomajiToggle={handleRomajiToggle}
             />
           )}
         </View>
@@ -567,6 +678,10 @@ export default function ReaderScreen() {
                   handMode={reader.handMode}
                   hasImage={hasChapterImage}
                   chapterImages={reader.chapterImages[currentChapterIndex] || []}
+                  romaji={reader.currentRomaji}
+                  romajiState={reader.romajiState}
+                  romajiError={reader.romajiError}
+                  romajiLayoutMode={romajiLayoutMode}
                   onWordPress={handleWordPress}
                   onRangeSelect={handleRangeSelect}
                 />
@@ -578,20 +693,17 @@ export default function ReaderScreen() {
           <BottomZone
             handMode={reader.handMode}
             isReading={ttsState === 'speaking'}
-            showTranslation={reader.showTranslation}
+            showTranslation={currentTranslationVisible}
+            showRomaji={romajiVisibleForCurrent}
+            romajiLoading={reader.romajiState === 'loading'}
             isFirst={reader.currentIndex <= 0}
             isLast={reader.currentIndex >= reader.totalSentences - 1}
             isLandscape={isLandscape}
             onPrev={handlePrev}
             onNext={handleNext}
             onTtsToggle={handleTtsToggle}
-            onTranslationToggle={() => {
-              if (!reader.showTranslation && currentSentence) {
-                translateTargetRef.current = { text: currentSentence.text, index: currentSentence.index };
-                setTranslateTrigger(n => n + 1);
-              }
-              reader.toggleTranslation();
-            }}
+            onTranslationToggle={handleTranslationToggle}
+            onRomajiToggle={handleRomajiToggle}
           />
         </>
       )}

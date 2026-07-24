@@ -8,6 +8,7 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { ttsController } from '../../services/tts';
 import { getEntryCount } from '../../services/dictionary';
 import { Colors } from '../../utils/constants';
+import type { RomajiLayoutMode } from '../../types/reader';
 
 interface SettingsOverlayProps {
   visible: boolean;
@@ -49,19 +50,25 @@ export function SettingsOverlay({ visible, onClose }: SettingsOverlayProps) {
 
             {/* ── 应用功能 ── */}
             <Section icon="📖" title="应用功能">
-              <InfoRow label="分句阅读" value="以句子为单位展示，左滑/右滑翻页，底部区域便捷操作。" />
+              <InfoRow label="分句阅读" value="以句子为单位展示。翻到上一句/下一句请使用底部操作区的箭头按钮，或在底部操作区空白处滑动。" />
               <InfoRow label="智能翻译" value="接入 DeepSeek 大模型，整句日→中翻译。翻译结果自动缓存，回看不重复请求。" />
               <InfoRow label="词典查询" value={`内置 ${entryCount > 0 ? entryCount.toLocaleString() + ' ' : ''}日汉词典，点按任意单词即可查词释义。离线可用。`} />
-              <InfoRow label="TTS 朗读" value="优先使用 Edge TTS 在线日语语音，失败时自动切换到系统 TTS / Google TTS。" />
+              <InfoRow label="罗马音标注" value="底部“音”按钮为当前句生成罗马音。生成结果会缓存；需要 DeepSeek API Key。" />
+              <InfoRow label="TTS 朗读" value="默认使用 Android 系统 TTS / Google 文字转语音，本地朗读日语句子。" />
               <InfoRow label="阅读导航" value="点击顶部进度条打开纲目导航，支持章节目录跳转和书签管理。" />
               <InfoRow label="单手模式" value="支持左手/右手操作切换，按钮和正文偏移适配单手使用。" />
               <InfoRow label="横竖屏" value="顶部切换横屏/竖屏模式，适配不同阅读场景。" />
               <InfoRow label="支持格式" value=".txt（纯文本）· .epub（电子书，含插图）" />
             </Section>
 
+            {/* ── 阅读显示 ── */}
+            <Section icon="Aa" title="阅读显示">
+              <RomajiLayoutControl />
+            </Section>
+
             {/* ── API Key 配置 ── */}
             <Section icon="🔑" title="翻译 API 配置">
-              <InfoRow label="说明" value="整段翻译需要 DeepSeek API Key。申请地址：platform.deepseek.com → API Keys。不配置 Key 不影响其他所有功能。" />
+              <InfoRow label="说明" value="整句翻译和罗马音生成需要 DeepSeek API Key。申请地址：platform.deepseek.com → API Keys。不配置 Key 不影响离线阅读、查词和系统 TTS。" />
               <ApiKeyInput />
               <Text style={styles.note}>
                 你的 API Key 使用 Android Keystore 加密存储，仅保存在手机本地。翻译请求通过 HTTPS 加密发送，本应用不收集任何个人信息。
@@ -76,8 +83,9 @@ export function SettingsOverlay({ visible, onClose }: SettingsOverlayProps) {
               <InfoRow label="数据存储" value="所有数据（书籍、词典、翻译缓存、阅读进度）均存储在手机本地 SQLite 数据库中。不联网、不上传、不收集。" />
               <InfoRow label="API Key" value="使用 Android Keystore 硬件级加密存储，其他任何应用无法读取。" />
               <InfoRow label="翻译请求" value="仅在你主动点击翻译按钮时，将当前句子文本通过 HTTPS 加密发送至 DeepSeek API。不发送任何个人身份信息。" />
-              <InfoRow label="TTS 朗读" value="Edge TTS 会把当前句子发送到你配置的 TTS 服务；系统 TTS 兜底时由手机本地引擎处理。" />
-              <InfoRow label="网络权限" value="本应用仅在你主动操作（翻译、TTS 合成）时使用网络，不会后台联网。" />
+              <InfoRow label="罗马音请求" value="仅在你主动点击“音”按钮且无本地缓存时，将当前句子文本发送至 DeepSeek API 生成罗马音。" />
+              <InfoRow label="TTS 朗读" value="默认由手机本地系统 TTS 处理。开发预留的在线 TTS provider 默认隐藏，普通设置页不会启用或发送文本。" />
+              <InfoRow label="网络权限" value="本应用仅在你主动操作（翻译、罗马音、TTS 合成）时使用网络，不会后台联网。" />
               <InfoRow label="开源透明" value="本应用完全开源，所有代码可在 GitHub 查阅，无后门、无追踪。" />
             </Section>
 
@@ -87,7 +95,7 @@ export function SettingsOverlay({ visible, onClose }: SettingsOverlayProps) {
               <Text style={styles.aboutText}>
                 开源 · 轻量 · 离线优先{'\n'}
                 在阅读原著中练习日语{'\n'}
-                小学館中日日中第2版 · Edge TTS{'\n'}
+                小学館中日日中第2版 · 系统 TTS{'\n'}
                 DeepSeek 翻译 · 完全离线可用
               </Text>
             </View>
@@ -139,6 +147,46 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     <View style={styles.infoRow}>
       <Text style={styles.infoLabel}>{label}</Text>
       <Text style={styles.infoValue}>{value}</Text>
+    </View>
+  );
+}
+
+function RomajiLayoutControl() {
+  const { romajiLayoutMode, setRomajiLayoutMode } = useSettingsStore();
+
+  const options: Array<{ mode: RomajiLayoutMode; label: string; desc: string }> = [
+    { mode: 'phrase', label: '不逐字精确', desc: '上方显示罗马音、下方显示原文，不做逐字对齐，适合省 token 的稳定阅读。' },
+    { mode: 'token', label: '逐字精确', desc: '实验显示：按返回片段上下排列，尽量靠近原文；正文查词点击保持原逻辑。' },
+  ];
+
+  return (
+    <View style={styles.settingBlock}>
+      <View style={styles.settingHeader}>
+        <Text style={styles.settingLabel}>罗马音排布</Text>
+        <Text style={styles.settingValue}>
+          {romajiLayoutMode === 'token' ? '逐字精确' : '不逐字精确'}
+        </Text>
+      </View>
+      <View style={styles.segmented}>
+        {options.map((option) => {
+          const active = romajiLayoutMode === option.mode;
+          return (
+            <TouchableOpacity
+              key={option.mode}
+              style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+              onPress={() => setRomajiLayoutMode(option.mode)}
+              activeOpacity={0.65}
+            >
+              <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      <Text style={styles.settingDesc}>
+        {options.find((option) => option.mode === romajiLayoutMode)?.desc}
+      </Text>
     </View>
   );
 }
@@ -207,81 +255,46 @@ function TTSSection() {
   const {
     ttsRate,
     setTtsRate,
-    edgeTtsEndpoint,
-    setEdgeTtsEndpoint,
-    edgeTtsVoice,
-    setEdgeTtsVoice,
   } = useSettingsStore();
   const ttsError = ttsController.getInitError();
   const ttsVoices = ttsController.getVoices();
   const engineType = ttsController.getEngine();
-  const [endpointInput, setEndpointInput] = useState(edgeTtsEndpoint);
-  const [voiceInput, setVoiceInput] = useState(edgeTtsVoice);
-  const [checking, setChecking] = useState(false);
-  const [edgeStatus, setEdgeStatus] = useState(ttsController.getEdgeStatus());
+  const guide = ttsController.getGoogleTtsGuide();
+  const [usageText, setUsageText] = useState('读取中...');
 
   useEffect(() => {
-    setEndpointInput(edgeTtsEndpoint);
-    setVoiceInput(edgeTtsVoice);
-  }, [edgeTtsEndpoint, edgeTtsVoice]);
-
-  const handleSaveEdge = async () => {
-    setEdgeTtsEndpoint(endpointInput.trim());
-    setEdgeTtsVoice(voiceInput.trim() || 'ja-JP-NanamiNeural');
-    setChecking(true);
-    setTimeout(async () => {
-      await ttsController.refreshEdgeStatus();
-      setEdgeStatus(ttsController.getEdgeStatus());
-      setChecking(false);
-    }, 0);
-  };
+    let cancelled = false;
+    ttsController.estimateUsage('', 'system').then((usage) => {
+      if (!cancelled) {
+        setUsageText(`${usage.month} · ${usage.localCharacters.toLocaleString()} 字符`);
+      }
+    }).catch(() => {
+      if (!cancelled) setUsageText('暂不可用');
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <Section icon="🔊" title="语音朗读（TTS）">
-      <View style={ttsController.isEdgeAvailable() ? styles.statusGreen : styles.statusBlue}>
+      <View style={engineType === 'system' ? styles.statusGreen : styles.statusBlue}>
         <Text style={styles.statusTitle}>
-          {engineType === 'edge' ? 'Edge TTS 在线语音（优先）' : '系统 TTS / Google TTS（兜底）'}
+          {engineType === 'system' ? '系统 TTS / Google TTS（默认）' : '系统 TTS 尚未完成初始化'}
         </Text>
         <Text style={styles.statusText}>
-          {edgeStatus || 'Edge TTS 会优先尝试；失败时自动切换到系统 TTS。'}
+          JaReader 默认调用手机本地 TTS。Android 系统 TTS 不支持 pause/resume，暂停会保持为平台降级行为。
         </Text>
-      </View>
-
-      <View style={styles.apiKeySection}>
-        <Text style={styles.sliderLabel}>Edge TTS 服务地址</Text>
-        <TextInput
-          style={styles.apiInput}
-          placeholder="http://127.0.0.1:8787"
-          placeholderTextColor={Colors.textTertiary}
-          value={endpointInput}
-          onChangeText={setEndpointInput}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        <Text style={styles.sliderLabel}>日语语音</Text>
-        <TextInput
-          style={styles.apiInput}
-          placeholder="ja-JP-NanamiNeural"
-          placeholderTextColor={Colors.textTertiary}
-          value={voiceInput}
-          onChangeText={setVoiceInput}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        <TouchableOpacity
-          style={[styles.apiBtn, styles.apiBtnSave]}
-          onPress={handleSaveEdge}
-          activeOpacity={0.6}
-        >
-          <Text style={styles.apiBtnText}>{checking ? '检测中...' : '保存并检测'}</Text>
-        </TouchableOpacity>
       </View>
 
       <View style={styles.warningBox}>
-        <Text style={styles.warningTitle}>兜底方案：Google 文字转语音</Text>
+        <Text style={styles.warningTitle}>{guide.title}</Text>
         <Text style={styles.warningText}>
-          Edge TTS 服务不可用时，会自动尝试系统 TTS。推荐安装 Google 文字转语音并下载日语语音数据。
+          {guide.summary}
         </Text>
+        <View style={styles.voiceTipsBox}>
+          <Text style={styles.voiceTipText}>不同日语声线效果差异明显，系统默认声线在低语速下可能出现颤音。</Text>
+          <Text style={styles.voiceTipText}>如果朗读发抖或不自然，建议到系统 TTS 设置里试听男性声线或其他日语声线。</Text>
+          <Text style={styles.voiceTipText}>JaReader 只能调用系统已提供的语音，实际可选项取决于手机系统和已安装语音包。</Text>
+        </View>
         {ttsVoices.length > 0 && (
           <View style={styles.voiceList}>
             <Text style={styles.voiceListTitle}>检测到的系统日语语音：</Text>
@@ -290,15 +303,31 @@ function TTSSection() {
                 {v.name} ({v.language}{v.quality ? ` · ${v.quality}` : ''})
               </Text>
             ))}
+            {ttsVoices.length > 5 && (
+              <Text style={styles.voiceName}>另有 {ttsVoices.length - 5} 个日语语音可由系统选择。</Text>
+            )}
           </View>
+        )}
+        {ttsVoices.length === 0 && (
+          <Text style={styles.voiceFallback}>
+            当前暂未检测到 ja-JP / Japanese 系统语音。请先在系统文字转语音设置中启用 Google 文字转语音并下载日语语音数据。
+          </Text>
         )}
         {ttsError && (
           <Text style={styles.errorText}>{ttsError}</Text>
         )}
         <View style={styles.stepsBox}>
-          <Text style={styles.stepText}>USB 调试本机服务：adb reverse tcp:8787 tcp:8787</Text>
-          <Text style={styles.stepText}>局域网服务：把地址改成 http://电脑IP:8787</Text>
+          {guide.steps.map((step, index) => (
+            <Text key={step} style={styles.stepText}>{index + 1}. {step}</Text>
+          ))}
         </View>
+      </View>
+
+      <View style={styles.statusBlue}>
+        <Text style={styles.statusTitle}>本地估算用量</Text>
+        <Text style={styles.statusText}>
+          本月系统 TTS 朗读：{usageText}。普通设置页只展示系统 TTS 主线；开发预留 provider 默认隐藏，未显式启用时不会发起在线 TTS 请求。
+        </Text>
       </View>
 
       <View style={styles.sliderSection}>
@@ -370,6 +399,55 @@ const styles = StyleSheet.create({
   infoLabel: { fontSize: 12, color: Colors.accent, fontWeight: '600', marginBottom: 2 },
   infoValue: { fontSize: 13, color: Colors.textSecondary, lineHeight: 20 },
 
+  // Reading display
+  settingBlock: {
+    backgroundColor: Colors.card,
+    borderRadius: 8,
+    padding: 12,
+  },
+  settingHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 12,
+  },
+  settingLabel: { fontSize: 13, color: Colors.textPrimary, fontWeight: '600' },
+  settingValue: { fontSize: 12, color: Colors.textTertiary },
+  segmented: {
+    flexDirection: 'row',
+    backgroundColor: Colors.bg,
+    borderRadius: 6,
+    padding: 3,
+    gap: 3,
+  },
+  segmentBtn: {
+    flex: 1,
+    minHeight: 34,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 5,
+    paddingHorizontal: 8,
+  },
+  segmentBtnActive: {
+    backgroundColor: Colors.accent,
+  },
+  segmentText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  segmentTextActive: {
+    color: '#fff',
+  },
+  settingDesc: {
+    fontSize: 12,
+    color: Colors.textTertiary,
+    lineHeight: 18,
+    marginTop: 8,
+  },
+
   // Note
   note: {
     fontSize: 11, color: Colors.textTertiary, lineHeight: 16,
@@ -403,6 +481,9 @@ const styles = StyleSheet.create({
   voiceList: { marginTop: 10, marginBottom: 4 },
   voiceListTitle: { fontSize: 11, color: '#8a7030', fontWeight: '500', marginBottom: 4 },
   voiceName: { fontSize: 11, color: '#6a5530', marginLeft: 2, marginBottom: 1 },
+  voiceTipsBox: { marginTop: 10, gap: 4 },
+  voiceTipText: { fontSize: 12, color: '#6a5530', lineHeight: 18 },
+  voiceFallback: { fontSize: 11, color: '#6a5530', marginTop: 10, lineHeight: 17 },
 
   // Status
   statusGreen: {

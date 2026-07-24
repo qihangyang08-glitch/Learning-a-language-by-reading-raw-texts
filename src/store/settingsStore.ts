@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { ManualOrientation } from '../types/book';
+import type { RomajiLayoutMode } from '../types/reader';
 import { fileStorage } from '../services/settings-storage';
 import { getApiKey, setApiKey } from '../services/secure-storage';
 
@@ -21,6 +22,7 @@ interface SettingsStoreState {
 
   // Display
   manualOrientation: ManualOrientation;
+  romajiLayoutMode: RomajiLayoutMode;
 
   // First launch
   firstLaunch: boolean;
@@ -35,6 +37,7 @@ interface SettingsStoreState {
   setEdgeTtsEndpoint: (endpoint: string) => void;
   setEdgeTtsVoice: (voice: string) => void;
   setManualOrientation: (orientation: ManualOrientation) => void;
+  setRomajiLayoutMode: (mode: RomajiLayoutMode) => void;
   setFirstLaunch: (first: boolean) => void;
   /** Call once at app startup — loads API key from secure store into the store */
   loadApiKeyFromSecureStore: () => Promise<void>;
@@ -50,9 +53,10 @@ export const useSettingsStore = create<SettingsStoreState>()(
       ttsRate: 1.0,
       ttsPitch: 1.0,
       ttsVoice: '',
-      edgeTtsEndpoint: 'http://127.0.0.1:8787',
+      edgeTtsEndpoint: '',
       edgeTtsVoice: 'ja-JP-NanamiNeural',
       manualOrientation: 'portrait',
+      romajiLayoutMode: 'phrase',
       firstLaunch: true,
 
       setTranslationEnabled: (translationEnabled) => set({ translationEnabled }),
@@ -68,6 +72,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       setEdgeTtsEndpoint: (edgeTtsEndpoint) => set({ edgeTtsEndpoint }),
       setEdgeTtsVoice: (edgeTtsVoice) => set({ edgeTtsVoice }),
       setManualOrientation: (manualOrientation) => set({ manualOrientation }),
+      setRomajiLayoutMode: (romajiLayoutMode) => set({ romajiLayoutMode }),
       setFirstLaunch: (firstLaunch) => set({ firstLaunch }),
       loadApiKeyFromSecureStore: async () => {
         try {
@@ -91,6 +96,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
         edgeTtsEndpoint: state.edgeTtsEndpoint,
         edgeTtsVoice: state.edgeTtsVoice,
         manualOrientation: state.manualOrientation,
+        romajiLayoutMode: state.romajiLayoutMode,
         firstLaunch: state.firstLaunch,
       }),
     },

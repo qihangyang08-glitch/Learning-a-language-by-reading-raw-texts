@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import type { BookMeta, Sentence, BookImage, TranslationCache, Bookmark } from '../types/book';
+import type { RomajiResult } from './romaji';
 import { DB_NAME, SENTENCE_WINDOW_RADIUS } from '../utils/constants';
 
 /**
@@ -10,6 +11,7 @@ import { DB_NAME, SENTENCE_WINDOW_RADIUS } from '../utils/constants';
  * - sentences: sentence text indexed by (book_id, global_index)
  * - chapter_images: extracted images
  * - translation_cache: DeepSeek translations keyed by (book_id, sentence_index)
+ * - romaji_cache: LLM romaji annotations keyed by (book_id, sentence_index, source_hash)
  * - bookmarks: user bookmarks
  */
 
@@ -71,6 +73,18 @@ export function initBookshelfTables(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_trans_book ON translation_cache(book_id, sentence_index);
 
+    CREATE TABLE IF NOT EXISTS romaji_cache (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      book_id TEXT NOT NULL,
+      sentence_index INTEGER NOT NULL,
+      source_hash TEXT NOT NULL,
+      items_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_romaji_unique ON romaji_cache(book_id, sentence_index, source_hash);
+    CREATE INDEX IF NOT EXISTS idx_romaji_book ON romaji_cache(book_id, sentence_index);
+
     CREATE TABLE IF NOT EXISTS bookmarks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       book_id TEXT NOT NULL,
@@ -128,6 +142,7 @@ export function deleteBook(bookId: string): void {
   d.runSync('DELETE FROM sentences WHERE book_id = ?', [bookId]);
   d.runSync('DELETE FROM chapter_images WHERE book_id = ?', [bookId]);
   d.runSync('DELETE FROM translation_cache WHERE book_id = ?', [bookId]);
+  d.runSync('DELETE FROM romaji_cache WHERE book_id = ?', [bookId]);
   d.runSync('DELETE FROM bookmarks WHERE book_id = ?', [bookId]);
   d.runSync('DELETE FROM books WHERE id = ?', [bookId]);
 }
@@ -306,6 +321,39 @@ export function getCachedTranslations(bookId: string, fromIndex: number, toIndex
   const map = new Map<number, string>();
   for (const r of rows) map.set(r.sentence_index, r.translated);
   return map;
+}
+
+// ── Romaji Cache ──
+
+export function getCachedRomaji(bookId: string, sentenceIndex: number, sourceHash: string): RomajiResult | null {
+  initBookshelfTables();
+  const row = getDb().getFirstSync<{ items_json: string }>(
+    'SELECT items_json FROM romaji_cache WHERE book_id = ? AND sentence_index = ? AND source_hash = ? LIMIT 1',
+    [bookId, sentenceIndex, sourceHash],
+  );
+  if (!row?.items_json) return null;
+
+  try {
+    const parsed = JSON.parse(row.items_json);
+    return { items: Array.isArray(parsed?.items) ? parsed.items : [] };
+  } catch {
+    return null;
+  }
+}
+
+export function setCachedRomaji(
+  bookId: string,
+  sentenceIndex: number,
+  sourceHash: string,
+  romaji: RomajiResult,
+): void {
+  initBookshelfTables();
+  getDb().runSync(
+    `INSERT OR REPLACE INTO romaji_cache
+      (book_id, sentence_index, source_hash, items_json, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [bookId, sentenceIndex, sourceHash, JSON.stringify(romaji), Date.now()],
+  );
 }
 
 // ── Bookmarks ──

@@ -6,6 +6,7 @@ import {
   setDictVersion,
   clearEntries,
   buildFtsIndex,
+  ensureLookupIndexes,
 } from './dictionary';
 
 /**
@@ -62,6 +63,10 @@ export async function initDictionary(
   if (count >= MIN_EXPECTED_DICT_ENTRIES && storedVersion === DICT_VERSION) {
     onProgress({ stage: 'done', progress: 1, message: `词库 ${count} 词已就绪` });
     console.log(`[dict] Already has ${count} entries (v${storedVersion})`);
+    setTimeout(() => {
+      ensureLookupIndexes();
+      console.log('[dict] Lookup indexes ready');
+    }, 100);
     return;
   }
 
@@ -122,6 +127,9 @@ export async function initDictionary(
         // Yield to UI thread between chunks
         await new Promise((r) => setTimeout(r, 0));
       }
+
+      ensureLookupIndexes();
+      console.log('[dict] Lookup indexes ready');
 
       setTimeout(() => {
         buildFtsIndex();

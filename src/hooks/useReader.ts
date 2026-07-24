@@ -65,6 +65,8 @@ export function useReader() {
     fontSize: reader.fontSize,
     lineHeight: reader.lineHeight,
     showTranslation: reader.showTranslation,
+    translationState: reader.translationState,
+    translationSentenceIndex: reader.translationSentenceIndex,
 
     // TTS
     isReading: reader.isReading,

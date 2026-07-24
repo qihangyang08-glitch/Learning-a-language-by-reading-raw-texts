@@ -1,0 +1,39 @@
+* text=auto eol=lf
+
+# Windows command files must stay CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell scripts should stay LF.
+*.sh text eol=lf
+gradlew text eol=lf
+
+# Android / Gradle / Kotlin source.
+*.gradle text eol=lf
+*.properties text eol=lf
+*.kt text eol=lf
+*.java text eol=lf
+*.xml text eol=lf
+
+# App source and docs.
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.ps1 text eol=lf
+
+# Binary assets.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.db binary
+*.sqlite binary
+*.jar binary
+*.keystore binary
+*.apk binary
+*.zip binary
+*.epub binary

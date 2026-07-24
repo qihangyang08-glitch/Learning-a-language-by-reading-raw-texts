@@ -8,9 +8,19 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import type { Sentence, Token } from '../../types/book';
+import type { RomajiResult } from '../../services/romaji';
+import type { RomajiDisplayState } from '../../store/readerStore';
+import type { RomajiLayoutMode } from '../../types/reader';
 import type { HandMode } from '../../utils/constants';
 import { InlineImage } from './InlineImage';
 import { Colors } from '../../utils/constants';
+import { lookupLongestTextMatchAt } from '../../services/dictionary';
+import {
+  createTextRangeToken,
+  findTokenIndexAtChar,
+  getTokenEnd,
+  getTokensOverlappingRange,
+} from '../../services/tokenizer';
 
 interface TextCardProps {
   sentence: Sentence | null;
@@ -20,6 +30,10 @@ interface TextCardProps {
   handMode: HandMode;
   hasImage: boolean;
   chapterImages: any[];
+  romaji?: RomajiResult | null;
+  romajiState?: RomajiDisplayState;
+  romajiError?: string | null;
+  romajiLayoutMode?: RomajiLayoutMode;
   onWordPress: (token: Token) => void;
   onRangeSelect?: (tokens: Token[]) => void;
 }
@@ -46,6 +60,10 @@ const TextCardInner = React.memo(function TextCard({
   handMode,
   hasImage,
   chapterImages,
+  romaji,
+  romajiState = 'hidden',
+  romajiError,
+  romajiLayoutMode = 'phrase',
   onWordPress,
   onRangeSelect,
 }: TextCardProps) {
@@ -53,15 +71,16 @@ const TextCardInner = React.memo(function TextCard({
   // ALL HOOKS — must be called unconditionally
   // ═══════════════════════════════════════════
 
-  const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [anchorCharIndex, setAnchorCharIndex] = useState<number | null>(null);
+  const [activeCharIndex, setActiveCharIndex] = useState<number | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
-  const [tappedIndex, setTappedIndex] = useState<number | null>(null);
+  const [tappedRange, setTappedRange] = useState<{ start: number; end: number } | null>(null);
 
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
-  const anchorIndexRef = useRef<number | null>(null);
-  const activeIndexRef = useRef<number | null>(null);
+  const anchorCharIndexRef = useRef<number | null>(null);
+  const activeCharIndexRef = useRef<number | null>(null);
+  const textRef = useRef<any>(null);
 
   // Derived data
   const tokens: Token[] = useMemo(() => {
@@ -69,216 +88,280 @@ const TextCardInner = React.memo(function TextCard({
     return sentence.tokens && sentence.tokens.length > 0 ? sentence.tokens : [];
   }, [sentence]);
 
+  const sentenceText = sentence?.text ?? '';
   const hasTokens = tokens.length > 0;
+  const hasText = sentenceText.length > 0;
+  const showRomaji = romajiState === 'current' || romajiState === 'loading' || romajiState === 'error';
+  const romajiItems = useMemo(
+    () => romaji?.items?.filter((item) => item.text.trim() && item.romaji.trim()) ?? [],
+    [romaji],
+  );
+  const phraseRomaji = useMemo(() => {
+    const plain = romaji?.romaji?.trim();
+    if (plain) return plain;
+    return romajiItems.map((item) => item.romaji).join(' ').trim();
+  }, [romaji?.romaji, romajiItems]);
 
   const selectedRange = useMemo((): [number, number] | null => {
-    if (anchorIndex === null || activeIndex === null) return null;
-    if (!isSelecting && anchorIndex === activeIndex) return null;
-    const start = Math.min(anchorIndex, activeIndex);
-    const end = Math.max(anchorIndex, activeIndex);
-    if (start === end && !isSelecting) return null;
+    if (anchorCharIndex === null || activeCharIndex === null) return null;
+    if (!isSelecting && anchorCharIndex === activeCharIndex) return null;
+    const start = Math.min(anchorCharIndex, activeCharIndex);
+    const end = Math.max(anchorCharIndex, activeCharIndex) + 1;
+    if (start >= end && !isSelecting) return null;
     return [start, end];
-  }, [anchorIndex, activeIndex, isSelecting]);
+  }, [anchorCharIndex, activeCharIndex, isSelecting]);
 
   const selectedSet = useMemo(() => {
     if (!selectedRange) return new Set<number>();
     const s = new Set<number>();
-    for (let i = selectedRange[0]; i <= selectedRange[1]; i++) s.add(i);
-    return s;
-  }, [selectedRange]);
-
-  // ── Hit-testing: XY-aware with line layout ──
-  // Uses onTextLayout to capture actual line positions, then maps
-  // touch Y → line → tokens on that line → touch X → token.
-  const cardLeftRef = useRef(0);
-  const cardTopRef = useRef(0);
-
-  // Line layout from onTextLayout: [{ y, height, firstToken, lastToken }]
-  const lineLayoutRef = useRef<Array<{ y: number; h: number; first: number; last: number }>>([]);
-
-  const onCardLayout = useCallback((e: LayoutChangeEvent) => {
-    const ref = e.target || e.currentTarget;
-    if (ref && typeof (ref as any).measureInWindow === 'function') {
-      (ref as any).measureInWindow((x: number, y: number) => {
-        cardLeftRef.current = x;
-        cardTopRef.current = y;
-      });
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i].wordPosition < selectedRange[1] && getTokenEnd(tokens[i]) > selectedRange[0]) {
+        s.add(i);
+      }
     }
+    return s;
+  }, [selectedRange, tokens]);
+
+  const tappedSet = useMemo(() => {
+    if (!tappedRange) return new Set<number>();
+    const s = new Set<number>();
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i].wordPosition < tappedRange.end && getTokenEnd(tokens[i]) > tappedRange.start) {
+        s.add(i);
+      }
+    }
+    return s;
+  }, [tappedRange, tokens]);
+
+  type TextLine = {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    text: string;
+    start: number;
+    end: number;
+  };
+
+  const textLeftRef = useRef(0);
+  const textTopRef = useRef(0);
+  const textWidthRef = useRef(0);
+  const lineLayoutRef = useRef<TextLine[]>([]);
+
+  const measureText = useCallback(() => {
+    textRef.current?.measureInWindow?.((x: number, y: number, width: number) => {
+      textLeftRef.current = x;
+      textTopRef.current = y;
+      textWidthRef.current = width;
+    });
   }, []);
 
-  // Called when the tokenized <Text> lays out — captures line-level
-  // Y positions and maps them to token index ranges.
-  const onTextLayoutHandler = useCallback((e: any) => {
-    const lines: Array<{ y: number; height: number; text: string }> =
-      e.nativeEvent?.lines ?? [];
-    if (lines.length === 0 || tokens.length === 0) return;
+  const onCardLayout = useCallback((_e: LayoutChangeEvent) => {
+    measureText();
+  }, [measureText]);
 
-    const layouts: Array<{ y: number; h: number; first: number; last: number }> = [];
-    let charOffset = 0;
+  const onTextBoxLayout = useCallback((e: LayoutChangeEvent) => {
+    textWidthRef.current = e.nativeEvent.layout.width;
+    measureText();
+  }, [measureText]);
+
+  const getEstimatedCharWidth = useCallback((char: string): number => {
+    const code = char.codePointAt(0) ?? 0;
+    if (code <= 0x7f) return fontSize * 0.55;
+    if (code >= 0xff61 && code <= 0xff9f) return fontSize * 0.55;
+    return fontSize;
+  }, [fontSize]);
+
+  const getEstimatedTextWidth = useCallback((textValue: string): number => {
+    let width = 0;
+    for (const char of textValue) width += getEstimatedCharWidth(char);
+    return width;
+  }, [getEstimatedCharWidth]);
+
+  const onTextLayoutHandler = useCallback((e: any) => {
+    const lines: Array<{ x?: number; y: number; width?: number; height?: number; text: string }> =
+      e.nativeEvent?.lines ?? [];
+    if (lines.length === 0 || sentenceText.length === 0) {
+      lineLayoutRef.current = [];
+      return;
+    }
+
+    const layouts: TextLine[] = [];
+    let searchFrom = 0;
 
     for (const line of lines) {
-      const lineEnd = charOffset + line.text.length;
-      // Find which tokens overlap with this line's character range
-      let firstTok = -1;
-      let lastTok = -1;
-      for (let t = 0; t < tokens.length; t++) {
-        const tokStart = tokens[t].wordPosition;
-        const tokEnd = tokStart + tokens[t].surfaceForm.length;
-        if (tokStart < lineEnd && tokEnd > charOffset) {
-          if (firstTok < 0) firstTok = t;
-          lastTok = t;
-        }
-      }
-      if (firstTok >= 0) {
-        layouts.push({
-          // line.y is relative to the Text element; add card paddingVertical
-          // so that comparison with (absoluteY - cardTop) is correct
-          y: line.y + 24 /* styles.textCard.paddingVertical */,
-          h: line.height || fontSize * lineHeight,
-          first: firstTok,
-          last: lastTok,
-        });
-      }
-      charOffset = lineEnd;
+      const lineText = line.text ?? '';
+      if (!lineText) continue;
+
+      const foundAt = sentenceText.indexOf(lineText, searchFrom);
+      const start = foundAt >= 0 ? foundAt : searchFrom;
+      const end = Math.min(sentenceText.length, start + lineText.length);
+      const estimatedWidth = getEstimatedTextWidth(lineText);
+      const actualWidth = line.width ?? estimatedWidth;
+      const fallbackX = Math.max(0, (textWidthRef.current - actualWidth) / 2);
+
+      layouts.push({
+        x: line.x ?? fallbackX,
+        y: line.y,
+        width: actualWidth || estimatedWidth,
+        height: line.height || fontSize * lineHeight,
+        text: sentenceText.slice(start, end),
+        start,
+        end,
+      });
+
+      searchFrom = end;
     }
 
     lineLayoutRef.current = layouts;
-  }, [tokens, fontSize, lineHeight]);
+  }, [fontSize, getEstimatedTextWidth, lineHeight, sentenceText]);
 
-  // Pre-compute estimated token widths (used for X hit-testing within a line)
-  const tokenWidths = useMemo(() => {
-    const w: number[] = [];
-    for (const tok of tokens) {
-      let cw = 0;
-      for (const ch of tok.surfaceForm) {
-        const code = ch.charCodeAt(0);
-        if (code >= 0x4e00 && code <= 0x9fff) cw += fontSize;
-        else if (code >= 0x3000 && code <= 0x30ff) cw += fontSize;
-        else if (code >= 0xff00) cw += fontSize;
-        else if (code <= 0x7f) cw += fontSize * 0.55;
-        else cw += fontSize;
+  const findLineAtY = useCallback((absoluteY: number, strict: boolean): TextLine | null => {
+    const relY = absoluteY - textTopRef.current;
+    const lines = lineLayoutRef.current;
+    if (lines.length === 0) return null;
+
+    let best: TextLine | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (const line of lines) {
+      const tolerance = strict ? Math.max(3, line.height * 0.12) : Math.max(6, line.height * 0.25);
+      if (relY < line.y - tolerance || relY > line.y + line.height + tolerance) continue;
+      const center = line.y + line.height / 2;
+      const distance = Math.abs(relY - center);
+      if (distance < bestDistance) {
+        best = line;
+        bestDistance = distance;
       }
-      w.push(cw);
     }
-    return w;
-  }, [tokens, fontSize]);
 
-  const getTokenIndexAt = useCallback(
-    (absoluteX: number, absoluteY: number): number | null => {
-      if (tokens.length === 0) return null;
+    return best;
+  }, []);
 
-      const relY = absoluteY - cardTopRef.current;
-      const lines = lineLayoutRef.current;
+  const getCharIndexAt = useCallback((absoluteX: number, absoluteY: number, strictY: boolean): number | null => {
+    if (!hasText) return null;
 
-      // Find which line the touch is on
-      let first = 0;
-      let last = tokens.length - 1;
-      if (lines.length > 0) {
-        for (const line of lines) {
-          if (relY >= line.y && relY < line.y + line.h) {
-            first = line.first;
-            last = line.last;
-            break;
-          }
-        }
+    const line = findLineAtY(absoluteY, strictY);
+    if (!line || line.start >= line.end) return null;
+
+    const relX = absoluteX - textLeftRef.current;
+    const lineWidth = line.width || getEstimatedTextWidth(line.text);
+    const lineX = line.x ?? Math.max(0, (textWidthRef.current - lineWidth) / 2);
+    const targetX = Math.max(0, Math.min(relX - lineX, lineWidth));
+    const estimatedWidth = getEstimatedTextWidth(line.text);
+    const scale = estimatedWidth > 0 ? lineWidth / estimatedWidth : 1;
+
+    let localOffset = 0;
+    let cursorX = 0;
+    for (const char of line.text) {
+      const charWidth = getEstimatedCharWidth(char) * scale;
+      if (targetX <= cursorX + charWidth / 2) {
+        return line.start + localOffset;
       }
+      cursorX += charWidth;
+      localOffset += char.length;
+    }
 
-      // X search within the line: use proportional estimation
-      // for tokens on this specific line
-      const count = last - first + 1;
-      if (count <= 0) return first;
+    return Math.max(line.start, line.end - 1);
+  }, [findLineAtY, getEstimatedCharWidth, getEstimatedTextWidth, hasText]);
 
-      // Estimate the total rendered width of tokens on this line
-      let lineWidth = 0;
-      for (let t = first; t <= last; t++) lineWidth += tokenWidths[t];
-
-      const relX = absoluteX - cardLeftRef.current;
-
-      // Search through tokens on this line using cumulative widths
-      // (starting from 0 for this line)
-      let cumX = 0;
-      for (let t = first; t <= last; t++) {
-        const tw = tokenWidths[t];
-        if (relX >= cumX && relX < cumX + tw) return t;
-        cumX += tw;
-      }
-
-      // Before/after the line: return nearest token on this line
-      if (relX < 0) return first;
-      return last;
-    },
-    [tokens.length, tokenWidths],
-  );
+  const createTokenForRange = useCallback((start: number, end: number, entryToken?: Partial<Token>) => {
+    const sourceTokens = getTokensOverlappingRange(tokens, start, end);
+    return {
+      ...createTextRangeToken(sentenceText, start, end, sourceTokens),
+      ...entryToken,
+      wordPosition: start,
+    };
+  }, [sentenceText, tokens]);
 
   // ── Single tap handler ──
-  const handleTokenPress = useCallback(
-    (token: Token, index: number) => {
-      // Don't process tap if already in selection mode
-      if (isSelecting) return;
-      // Brief highlight on tapped token
-      setTappedIndex(index);
-      setAnchorIndex(null);
-      setActiveIndex(null);
+  const handleTapAt = useCallback((absX: number, absY: number) => {
+    if (isSelecting || !sentence) return;
+    const charIndex = getCharIndexAt(absX, absY, false);
+    if (charIndex === null) return;
+
+    const dictionaryMatch = lookupLongestTextMatchAt(sentence.text, charIndex);
+    if (dictionaryMatch) {
+      const token = createTokenForRange(dictionaryMatch.start, dictionaryMatch.end, {
+        reading: dictionaryMatch.entry.reading,
+        baseForm: dictionaryMatch.entry.word,
+        pos: dictionaryMatch.entry.pos.join(','),
+      });
+      setTappedRange({ start: dictionaryMatch.start, end: dictionaryMatch.end });
+      setAnchorCharIndex(null);
+      setActiveCharIndex(null);
       setIsSelecting(false);
       onWordPress(token);
-      // Clear tap highlight after feedback delay
-      setTimeout(() => setTappedIndex(null), 500);
-    },
-    [onWordPress, isSelecting],
-  );
+      setTimeout(() => setTappedRange(null), 500);
+      return;
+    }
+
+    const tokenIndex = findTokenIndexAtChar(tokens, charIndex);
+    const fallbackToken = tokenIndex === null
+      ? createTokenForRange(charIndex, charIndex + 1)
+      : tokens[tokenIndex];
+    const fallbackEnd = tokenIndex === null ? charIndex + 1 : getTokenEnd(fallbackToken);
+
+    setTappedRange({ start: fallbackToken.wordPosition, end: fallbackEnd });
+    setAnchorCharIndex(null);
+    setActiveCharIndex(null);
+    setIsSelecting(false);
+    onWordPress(fallbackToken);
+    setTimeout(() => setTappedRange(null), 500);
+  }, [createTokenForRange, getCharIndexAt, isSelecting, onWordPress, sentence, tokens]);
 
   // ── Selection callbacks (JS-only, called via runOnJS from worklets) ──
 
-  const beginSelectionAt = useCallback((idx: number | null) => {
-    if (idx === null) return;
+  const beginSelectionAt = useCallback((charIndex: number | null) => {
+    if (charIndex === null) return;
     // Guard against double-init from simultaneous Pan + LongPress
-    if (anchorIndexRef.current !== null) return;
-    anchorIndexRef.current = idx;
-    activeIndexRef.current = idx;
+    if (anchorCharIndexRef.current !== null) return;
+    anchorCharIndexRef.current = charIndex;
+    activeCharIndexRef.current = charIndex;
     setIsSelecting(true);
-    setAnchorIndex(idx);
-    setActiveIndex(idx);
+    setAnchorCharIndex(charIndex);
+    setActiveCharIndex(charIndex);
   }, []);
 
   // Entire JS-path wrapper for Pan's onStart
   const handlePanStart = useCallback(() => {
-    if (anchorIndexRef.current !== null) return;
-    const idx = getTokenIndexAt(touchStartX.current, touchStartY.current);
-    beginSelectionAt(idx);
-  }, [getTokenIndexAt, beginSelectionAt]);
+    if (anchorCharIndexRef.current !== null) return;
+    const charIndex = getCharIndexAt(touchStartX.current, touchStartY.current, true);
+    beginSelectionAt(charIndex);
+  }, [getCharIndexAt, beginSelectionAt]);
 
   // Entire JS-path wrapper for LongPress's onStart
   const handleLongPressStart = useCallback((absX: number, absY: number) => {
-    if (anchorIndexRef.current !== null) return;
-    const idx = getTokenIndexAt(absX, absY);
-    beginSelectionAt(idx);
-  }, [getTokenIndexAt, beginSelectionAt]);
+    if (anchorCharIndexRef.current !== null) return;
+    const charIndex = getCharIndexAt(absX, absY, true);
+    beginSelectionAt(charIndex);
+  }, [getCharIndexAt, beginSelectionAt]);
 
   const updateSelectionTo = useCallback((absX: number, absY: number) => {
-    const idx = getTokenIndexAt(absX, absY);
-    if (idx !== null) {
-      activeIndexRef.current = idx;
-      setActiveIndex(idx);
+    const charIndex = getCharIndexAt(absX, absY, true);
+    if (charIndex !== null) {
+      activeCharIndexRef.current = charIndex;
+      setActiveCharIndex(charIndex);
     }
-  }, [getTokenIndexAt]);
+  }, [getCharIndexAt]);
 
   const endSelection = useCallback(() => {
-    const anchor = anchorIndexRef.current;
-    const active = activeIndexRef.current;
+    const anchor = anchorCharIndexRef.current;
+    const active = activeCharIndexRef.current;
     if (anchor !== null && active !== null && anchor !== active && onRangeSelect) {
       const start = Math.min(anchor, active);
-      const end = Math.max(anchor, active);
-      const selectedTokens = tokens.slice(start, end + 1);
+      const end = Math.max(anchor, active) + 1;
+      const selectedTokens = [createTokenForRange(start, end)];
       if (selectedTokens.length > 0) onRangeSelect(selectedTokens);
     }
     setTimeout(() => {
-      anchorIndexRef.current = null;
-      activeIndexRef.current = null;
-      setAnchorIndex(null);
-      setActiveIndex(null);
+      anchorCharIndexRef.current = null;
+      activeCharIndexRef.current = null;
+      setAnchorCharIndex(null);
+      setActiveCharIndex(null);
       setIsSelecting(false);
     }, 600);
-  }, [tokens, onRangeSelect]);
+  }, [createTokenForRange, onRangeSelect]);
 
   // ── Gesture: Simultaneous Pan + LongPress for range selection ──
   //
@@ -290,7 +373,7 @@ const TextCardInner = React.memo(function TextCard({
   // failOffsetY ensures vertical swipes fail the Pan (ScrollView takes over).
   const panGesture = useMemo(() =>
     Gesture.Pan()
-      .enabled(hasTokens && !!onRangeSelect)
+      .enabled(hasText && !!onRangeSelect)
       .onTouchesDown((e) => {
         const first = e.changedTouches?.[0];
         if (first) {
@@ -311,25 +394,35 @@ const TextCardInner = React.memo(function TextCard({
       .failOffsetY([-18, 18])
       .minPointers(1)
       .maxPointers(1),
-    [hasTokens, onRangeSelect, handlePanStart, updateSelectionTo, endSelection],
+    [hasText, onRangeSelect, handlePanStart, updateSelectionTo, endSelection],
+  );
+
+  const tapGesture = useMemo(() =>
+    Gesture.Tap()
+      .enabled(hasText)
+      .maxDuration(280)
+      .maxDistance(10)
+      .onEnd((e) => {
+        runOnJS(handleTapAt)(e.absoluteX, e.absoluteY);
+      }),
+    [hasText, handleTapAt],
   );
 
   // Long press enters selection mode; the Pan gesture's onUpdate handles tracking.
   const longPressGesture = useMemo(() =>
     Gesture.LongPress()
-      .enabled(hasTokens && !!onRangeSelect)
+      .enabled(hasText && !!onRangeSelect)
       .minDuration(400)
       .onStart((e) => {
         runOnJS(handleLongPressStart)(e.absoluteX, e.absoluteY);
       }),
-    [hasTokens, onRangeSelect, handleLongPressStart],
+    [hasText, onRangeSelect, handleLongPressStart],
   );
 
-  // Compose: Pan and LongPress run simultaneously — the first to activate
-  // sets the selection anchor, and Pan's tracking handles extension.
+  // Compose: Tap looks up a word; Pan and LongPress handle range selection.
   const composedGesture = useMemo(() =>
-    Gesture.Simultaneous(panGesture, longPressGesture),
-    [panGesture, longPressGesture],
+    Gesture.Simultaneous(tapGesture, panGesture, longPressGesture),
+    [tapGesture, panGesture, longPressGesture],
   );
 
   const lineH = fontSize * lineHeight;
@@ -378,23 +471,63 @@ const TextCardInner = React.memo(function TextCard({
           style={styles.textCard}
           onLayout={onCardLayout}
         >
-          {!hasTokens ? (
-            <Text style={[styles.plainText, { fontSize, lineHeight: lineH }]}>
+          {showRomaji && romajiState === 'loading' && (
+            <Text style={styles.romajiHint}>罗马音生成中...</Text>
+          )}
+          {showRomaji && romajiState === 'error' && (
+            <Text style={[styles.romajiHint, styles.romajiErrorText]}>
+              {romajiError || '罗马音暂不可用'}
+            </Text>
+          )}
+          {showRomaji && romajiState === 'current' && romajiLayoutMode === 'phrase' && phraseRomaji ? (
+            <View style={styles.romajiPhraseBlock}>
+              <Text style={[styles.romajiPhraseLine, { fontSize: Math.max(12, fontSize * 0.58) }]}>
+                {phraseRomaji}
+              </Text>
+              <Text
+                ref={textRef}
+                style={[hasTokens ? styles.tokenizedText : styles.plainText, { fontSize, lineHeight: lineH }]}
+                onLayout={onTextBoxLayout}
+                onTextLayout={onTextLayoutHandler}
+              >
+                {sentence.text}
+              </Text>
+            </View>
+          ) : showRomaji && romajiState === 'current' && romajiLayoutMode === 'token' && romajiItems.length ? (
+            <View style={styles.romajiTokenGrid} pointerEvents="none">
+              {romajiItems.map((item, index) => (
+                <View key={`${item.text}-${index}`} style={styles.romajiTokenItem}>
+                  <Text style={styles.romajiTokenReading}>{item.romaji}</Text>
+                  <Text style={styles.romajiTokenSurface}>{item.text}</Text>
+                </View>
+              ))}
+            </View>
+          ) : !hasTokens ? (
+            <Text
+              ref={textRef}
+              style={[styles.plainText, { fontSize, lineHeight: lineH }]}
+              onLayout={onTextBoxLayout}
+              onTextLayout={onTextLayoutHandler}
+            >
               {sentence.text}
             </Text>
           ) : (
             <Text
+              ref={textRef}
               style={[styles.tokenizedText, { fontSize, lineHeight: lineH }]}
+              onLayout={onTextBoxLayout}
               onTextLayout={onTextLayoutHandler}
             >
               {tokens.map((token, i) => {
                 const isSel = selectedSet.has(i);
-                const isAnchor = i === anchorIndex;
-                const isTapped = i === tappedIndex;
+                const isAnchor =
+                  anchorCharIndex !== null &&
+                  anchorCharIndex >= token.wordPosition &&
+                  anchorCharIndex < getTokenEnd(token);
+                const isTapped = tappedSet.has(i);
                 return (
                   <Text
                     key={`${token.wordPosition}-${i}`}
-                    onPress={() => handleTokenPress(token, i)}
                     style={[
                       styles.token,
                       isSel && styles.highlighted,
@@ -416,7 +549,7 @@ const TextCardInner = React.memo(function TextCard({
       {isSelecting && selectedRange && (
         <View style={styles.selectionHint} pointerEvents="none">
           <Text style={styles.selectionHintText}>
-            {selectedRange[1] - selectedRange[0] + 1} 个词
+            {selectedRange[1] - selectedRange[0]} 字
           </Text>
         </View>
       )}
@@ -430,6 +563,10 @@ function arePropsEqual(prev: TextCardProps, next: TextCardProps): boolean {
   if (prev.isLandscape !== next.isLandscape) return false;
   if (prev.handMode !== next.handMode) return false;
   if (prev.hasImage !== next.hasImage) return false;
+  if (prev.romajiState !== next.romajiState) return false;
+  if (prev.romajiError !== next.romajiError) return false;
+  if (prev.romaji !== next.romaji) return false;
+  if (prev.romajiLayoutMode !== next.romajiLayoutMode) return false;
 
   const ps = prev.sentence;
   const ns = next.sentence;
@@ -491,6 +628,68 @@ const styles = StyleSheet.create({
     elevation: 2,
     maxWidth: 600,
     alignSelf: 'center',
+  },
+  romajiBox: {
+    alignSelf: 'stretch',
+    marginBottom: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.accentLight,
+  },
+  romajiErrorBox: {
+    backgroundColor: '#f7ece8',
+  },
+  romajiPhraseBlock: {
+    marginBottom: 12,
+  },
+  romajiPhraseLine: {
+    color: Colors.textTertiary,
+    lineHeight: 16,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  romajiText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  romajiTokenGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  romajiTokenItem: {
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    minWidth: 24,
+    paddingHorizontal: 2,
+    paddingVertical: 1,
+  },
+  romajiTokenReading: {
+    fontSize: 10,
+    color: Colors.textTertiary,
+    lineHeight: 14,
+    textAlign: 'center',
+  },
+  romajiTokenSurface: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  romajiHint: {
+    fontSize: 12,
+    color: Colors.textTertiary,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  romajiErrorText: {
+    color: '#b85c4a',
   },
   plainText: {
     color: Colors.textPrimary,
