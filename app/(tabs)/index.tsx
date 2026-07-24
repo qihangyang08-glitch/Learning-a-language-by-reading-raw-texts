@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, StyleSheet, SafeAreaView, Alert, Text, Platform, StatusBar, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, SafeAreaView, Alert, Text, Platform, StatusBar, TouchableOpacity, ActivityIndicator } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
 import { BookGrid } from '../../src/components/books/BookGrid';
@@ -7,6 +7,7 @@ import { ImportButton } from '../../src/components/books/ImportButton';
 import { SettingsOverlay } from '../../src/components/settings/SettingsOverlay';
 import { useBookStore } from '../../src/store/bookStore';
 import { useSettingsStore } from '../../src/store/settingsStore';
+import { useAppStatusStore } from '../../src/store/appStatusStore';
 import * as FileSystem from 'expo-file-system/legacy';
 import { StorageService } from '../../src/services/storage';
 import {
@@ -29,6 +30,9 @@ export default function LibraryScreen() {
   const router = useRouter();
   const { books, addBook, removeBook, setLoading } = useBookStore();
   const { setFirstLaunch } = useSettingsStore();
+  const dictionaryStage = useAppStatusStore((s) => s.dictionaryStage);
+  const dictionaryMessage = useAppStatusStore((s) => s.dictionaryMessage);
+  const dictionaryProgress = useAppStatusStore((s) => s.dictionaryProgress);
   const [showSettings, setShowSettings] = useState(false);
   const [importingId, setImportingId] = useState<string | null>(null);
   const [firstLaunchChecked, setFirstLaunchChecked] = useState(false);
@@ -174,6 +178,11 @@ export default function LibraryScreen() {
     setShowSettings(true);
   }, []);
 
+  const showDictionaryBanner =
+    dictionaryStage === 'checking' ||
+    dictionaryStage === 'importing' ||
+    dictionaryStage === 'error';
+
   return (
     <View style={styles.root}>
       <SafeAreaView style={styles.container}>
@@ -189,6 +198,21 @@ export default function LibraryScreen() {
             <Text style={styles.settingsIcon}>≡</Text>
           </TouchableOpacity>
         </View>
+
+        {showDictionaryBanner && (
+          <View style={[
+            styles.dictionaryBanner,
+            dictionaryStage === 'error' && styles.dictionaryBannerError,
+          ]}>
+            {dictionaryStage !== 'error' && (
+              <ActivityIndicator size="small" color={Colors.accent} />
+            )}
+            <Text style={styles.dictionaryBannerText} numberOfLines={1}>
+              {dictionaryMessage || '词典准备中...'}
+              {dictionaryStage === 'importing' ? ` ${Math.round(dictionaryProgress * 100)}%` : ''}
+            </Text>
+          </View>
+        )}
 
         {/* Book list */}
         <BookGrid
@@ -240,6 +264,24 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textPrimary,
     letterSpacing: 1,
+  },
+  dictionaryBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: Colors.accentLight,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.divider,
+  },
+  dictionaryBannerError: {
+    backgroundColor: '#f7ece8',
+  },
+  dictionaryBannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: Colors.textSecondary,
   },
   settingsBtn: {
     width: 44,

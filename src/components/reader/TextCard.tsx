@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, LayoutChangeEvent } from 'react-native';
 import {
   GestureDetector,
@@ -75,6 +75,7 @@ const TextCardInner = React.memo(function TextCard({
   const [activeCharIndex, setActiveCharIndex] = useState<number | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
   const [tappedRange, setTappedRange] = useState<{ start: number; end: number } | null>(null);
+  const [phraseTextWidth, setPhraseTextWidth] = useState(0);
 
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
@@ -141,12 +142,15 @@ const TextCardInner = React.memo(function TextCard({
     text: string;
     start: number;
     end: number;
+    absolute?: boolean;
   };
 
   const textLeftRef = useRef(0);
   const textTopRef = useRef(0);
   const textWidthRef = useRef(0);
   const lineLayoutRef = useRef<TextLine[]>([]);
+  const phraseLineRefs = useRef<any[]>([]);
+  const phraseLineLayoutMapRef = useRef<Map<number, TextLine>>(new Map());
 
   const measureText = useCallback(() => {
     textRef.current?.measureInWindow?.((x: number, y: number, width: number) => {
@@ -156,7 +160,9 @@ const TextCardInner = React.memo(function TextCard({
     });
   }, []);
 
-  const onCardLayout = useCallback((_e: LayoutChangeEvent) => {
+  const onCardLayout = useCallback((e: LayoutChangeEvent) => {
+    const nextWidth = Math.max(0, e.nativeEvent.layout.width - TEXT_CARD_HORIZONTAL_PADDING * 2);
+    setPhraseTextWidth((current) => (Math.abs(current - nextWidth) > 1 ? nextWidth : current));
     measureText();
   }, [measureText]);
 
@@ -177,6 +183,83 @@ const TextCardInner = React.memo(function TextCard({
     for (const char of textValue) width += getEstimatedCharWidth(char);
     return width;
   }, [getEstimatedCharWidth]);
+
+  const phraseSourceLines = useMemo(() => {
+    if (!sentenceText) return [];
+    const maxWidth = phraseTextWidth || Math.min(360, Math.max(fontSize * 6, sentenceText.length * fontSize));
+    const lines: Array<{ text: string; start: number; end: number }> = [];
+    let line = '';
+    let lineStart = 0;
+    let lineWidth = 0;
+    let offset = 0;
+
+    for (const char of sentenceText) {
+      const charWidth = getEstimatedCharWidth(char);
+      if (line && lineWidth + charWidth > maxWidth) {
+        lines.push({ text: line, start: lineStart, end: offset });
+        line = '';
+        lineStart = offset;
+        lineWidth = 0;
+      }
+      line += char;
+      lineWidth += charWidth;
+      offset += char.length;
+    }
+
+    if (line) lines.push({ text: line, start: lineStart, end: offset });
+    return lines.length > 0 ? lines : [{ text: sentenceText, start: 0, end: sentenceText.length }];
+  }, [fontSize, getEstimatedCharWidth, phraseTextWidth, sentenceText]);
+
+  const phraseRomajiLines = useMemo(() => {
+    const words = phraseRomaji.split(/\s+/).filter(Boolean);
+    if (words.length === 0 || phraseSourceLines.length === 0) return [];
+
+    const totalChars = Math.max(1, phraseSourceLines.reduce((sum, line) => sum + line.text.length, 0));
+    const result: string[] = [];
+    let wordCursor = 0;
+    let charCursor = 0;
+
+    for (let i = 0; i < phraseSourceLines.length; i++) {
+      const sourceLine = phraseSourceLines[i];
+      charCursor += sourceLine.text.length;
+      const targetEnd = i === phraseSourceLines.length - 1
+        ? words.length
+        : Math.max(wordCursor + 1, Math.round((charCursor / totalChars) * words.length));
+      result.push(words.slice(wordCursor, Math.min(words.length, targetEnd)).join(' '));
+      wordCursor = Math.min(words.length, targetEnd);
+    }
+
+    return result;
+  }, [phraseRomaji, phraseSourceLines]);
+
+  useEffect(() => {
+    phraseLineLayoutMapRef.current.clear();
+    if (romajiLayoutMode === 'phrase' && showRomaji && romajiState === 'current') {
+      lineLayoutRef.current = [];
+    }
+  }, [phraseSourceLines, romajiLayoutMode, romajiState, showRomaji]);
+
+  const updatePhraseLineLayout = useCallback((lineIndex: number) => {
+    const node = phraseLineRefs.current[lineIndex];
+    const line = phraseSourceLines[lineIndex];
+    if (!node || !line) return;
+
+    node.measureInWindow?.((x: number, y: number, width: number, height: number) => {
+      phraseLineLayoutMapRef.current.set(lineIndex, {
+        x,
+        y,
+        width: width || getEstimatedTextWidth(line.text),
+        height: height || fontSize * lineHeight,
+        text: line.text,
+        start: line.start,
+        end: line.end,
+        absolute: true,
+      });
+      lineLayoutRef.current = Array.from(phraseLineLayoutMapRef.current.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([, value]) => value);
+    });
+  }, [fontSize, getEstimatedTextWidth, lineHeight, phraseSourceLines]);
 
   const onTextLayoutHandler = useCallback((e: any) => {
     const lines: Array<{ x?: number; y: number; width?: number; height?: number; text: string }> =
@@ -225,10 +308,11 @@ const TextCardInner = React.memo(function TextCard({
     let bestDistance = Number.POSITIVE_INFINITY;
 
     for (const line of lines) {
+      const targetY = line.absolute ? absoluteY : relY;
       const tolerance = strict ? Math.max(3, line.height * 0.12) : Math.max(6, line.height * 0.25);
-      if (relY < line.y - tolerance || relY > line.y + line.height + tolerance) continue;
+      if (targetY < line.y - tolerance || targetY > line.y + line.height + tolerance) continue;
       const center = line.y + line.height / 2;
-      const distance = Math.abs(relY - center);
+      const distance = Math.abs(targetY - center);
       if (distance < bestDistance) {
         best = line;
         bestDistance = distance;
@@ -244,9 +328,9 @@ const TextCardInner = React.memo(function TextCard({
     const line = findLineAtY(absoluteY, strictY);
     if (!line || line.start >= line.end) return null;
 
-    const relX = absoluteX - textLeftRef.current;
+    const relX = line.absolute ? absoluteX - line.x : absoluteX - textLeftRef.current;
     const lineWidth = line.width || getEstimatedTextWidth(line.text);
-    const lineX = line.x ?? Math.max(0, (textWidthRef.current - lineWidth) / 2);
+    const lineX = line.absolute ? 0 : line.x ?? Math.max(0, (textWidthRef.current - lineWidth) / 2);
     const targetX = Math.max(0, Math.min(relX - lineX, lineWidth));
     const estimatedWidth = getEstimatedTextWidth(line.text);
     const scale = estimatedWidth > 0 ? lineWidth / estimatedWidth : 1;
@@ -426,6 +510,14 @@ const TextCardInner = React.memo(function TextCard({
   );
 
   const lineH = fontSize * lineHeight;
+  const phraseRomajiFontSize = Math.max(12, Math.round(fontSize * 0.58));
+  const phraseRomajiLineHeight = Math.round(phraseRomajiFontSize * 1.3);
+  const tokenRomajiFontSize = Math.max(10, Math.round(fontSize * 0.54));
+  const tokenRomajiLineHeight = Math.round(tokenRomajiFontSize * 1.25);
+  const tokenSurfaceLineHeight = Math.round(fontSize * 1.2);
+  const tokenMinWidth = Math.max(26, Math.round(fontSize * 1.45));
+  const tokenColumnGap = Math.max(5, Math.round(fontSize * 0.32));
+  const tokenRowGap = Math.max(8, Math.round(fontSize * 0.48));
 
   // ═══════════════════════════════════════════
   // RENDER — conditional returns AFTER all hooks
@@ -481,24 +573,55 @@ const TextCardInner = React.memo(function TextCard({
           )}
           {showRomaji && romajiState === 'current' && romajiLayoutMode === 'phrase' && phraseRomaji ? (
             <View style={styles.romajiPhraseBlock}>
-              <Text style={[styles.romajiPhraseLine, { fontSize: Math.max(12, fontSize * 0.58) }]}>
-                {phraseRomaji}
-              </Text>
-              <Text
-                ref={textRef}
-                style={[hasTokens ? styles.tokenizedText : styles.plainText, { fontSize, lineHeight: lineH }]}
-                onLayout={onTextBoxLayout}
-                onTextLayout={onTextLayoutHandler}
-              >
-                {sentence.text}
-              </Text>
+              {phraseSourceLines.map((line, index) => (
+                <View key={`${line.start}-${line.end}`} style={styles.romajiPhrasePair}>
+                  <Text
+                    style={[
+                      styles.romajiPhraseLine,
+                      { fontSize: phraseRomajiFontSize, lineHeight: phraseRomajiLineHeight },
+                    ]}
+                  >
+                    {phraseRomajiLines[index] || ' '}
+                  </Text>
+                  <Text
+                    ref={(node) => { phraseLineRefs.current[index] = node; }}
+                    style={[hasTokens ? styles.tokenizedText : styles.plainText, { fontSize, lineHeight: lineH }]}
+                    onLayout={() => updatePhraseLineLayout(index)}
+                  >
+                    {line.text}
+                  </Text>
+                </View>
+              ))}
             </View>
           ) : showRomaji && romajiState === 'current' && romajiLayoutMode === 'token' && romajiItems.length ? (
-            <View style={styles.romajiTokenGrid} pointerEvents="none">
+            <View
+              style={[
+                styles.romajiTokenGrid,
+                { columnGap: tokenColumnGap, rowGap: tokenRowGap },
+              ]}
+              pointerEvents="none"
+            >
               {romajiItems.map((item, index) => (
-                <View key={`${item.text}-${index}`} style={styles.romajiTokenItem}>
-                  <Text style={styles.romajiTokenReading}>{item.romaji}</Text>
-                  <Text style={styles.romajiTokenSurface}>{item.text}</Text>
+                <View
+                  key={`${item.text}-${index}`}
+                  style={[styles.romajiTokenItem, { minWidth: tokenMinWidth }]}
+                >
+                  <Text
+                    style={[
+                      styles.romajiTokenReading,
+                      { fontSize: tokenRomajiFontSize, lineHeight: tokenRomajiLineHeight },
+                    ]}
+                  >
+                    {item.romaji}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.romajiTokenSurface,
+                      { fontSize, lineHeight: tokenSurfaceLineHeight },
+                    ]}
+                  >
+                    {item.text}
+                  </Text>
                 </View>
               ))}
             </View>
@@ -592,6 +715,8 @@ function arePropsEqual(prev: TextCardProps, next: TextCardProps): boolean {
 
 export { TextCardInner as TextCard };
 
+const TEXT_CARD_HORIZONTAL_PADDING = 28;
+
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
   imageContainer: {
@@ -619,7 +744,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.divider,
     marginHorizontal: 16,
-    paddingHorizontal: 28,
+    paddingHorizontal: TEXT_CARD_HORIZONTAL_PADDING,
     paddingVertical: 24,
     shadowColor: Colors.shadowMedium,
     shadowOffset: { width: 0, height: 1 },
@@ -641,13 +766,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#f7ece8',
   },
   romajiPhraseBlock: {
-    marginBottom: 12,
+    gap: 8,
+  },
+  romajiPhrasePair: {
+    alignItems: 'center',
   },
   romajiPhraseLine: {
     color: Colors.textTertiary,
-    lineHeight: 16,
     textAlign: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   romajiText: {
     fontSize: 12,
@@ -660,27 +787,20 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'center',
     alignItems: 'flex-end',
-    gap: 8,
   },
   romajiTokenItem: {
     alignItems: 'center',
     justifyContent: 'flex-end',
-    minWidth: 24,
     paddingHorizontal: 2,
     paddingVertical: 1,
   },
   romajiTokenReading: {
-    fontSize: 10,
     color: Colors.textTertiary,
-    lineHeight: 14,
     textAlign: 'center',
   },
   romajiTokenSurface: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    lineHeight: 18,
+    color: Colors.textPrimary,
     textAlign: 'center',
-    fontWeight: '500',
   },
   romajiHint: {
     fontSize: 12,

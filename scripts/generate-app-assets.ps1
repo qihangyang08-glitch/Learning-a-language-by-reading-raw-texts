@@ -93,9 +93,11 @@ function Save-ScaledPng {
     }
 
     $ratio = [Math]::Min($Size / $SourceImage.Width, $Size / $SourceImage.Height)
-    $innerSize = [int][Math]::Round($Size * $Scale * $ratio)
-    $offset = [int][Math]::Round(($Size - $innerSize) / 2)
-    $dest = New-Object System.Drawing.Rectangle($offset, $offset, $innerSize, $innerSize)
+    $innerWidth = [int][Math]::Round($SourceImage.Width * $ratio * $Scale)
+    $innerHeight = [int][Math]::Round($SourceImage.Height * $ratio * $Scale)
+    $offsetX = [int][Math]::Round(($Size - $innerWidth) / 2)
+    $offsetY = [int][Math]::Round(($Size - $innerHeight) / 2)
+    $dest = New-Object System.Drawing.Rectangle($offsetX, $offsetY, $innerWidth, $innerHeight)
     $graphics.DrawImage($SourceImage, $dest)
   } finally {
     $graphics.Dispose()
@@ -121,7 +123,7 @@ $background = Convert-HexColor $BackgroundColor
 try {
   Save-InsetPng -SourceImage $sourceImage -Output "assets/icon.png" -Size 1024 -Scale 0.84 -Fill $background
   Save-InsetPng -SourceImage $sourceImage -Output "assets/splash-icon.png" -Size 1024 -Scale 0.88 -Fill $null
-  Save-InsetPng -SourceImage $sourceImage -Output "assets/android-icon-foreground.png" -Size 1024 -Scale 0.70 -Fill $null
+  Save-InsetPng -SourceImage $sourceImage -Output "assets/android-icon-foreground.png" -Size 1024 -Scale 0.78 -Fill $null
 
   $androidIconSizes = @{
     "mdpi" = 108
@@ -135,7 +137,7 @@ try {
     $size = [int]$entry.Value
     Save-ScaledPng -SourceImage $sourceImage -Output "android/app/src/main/res/mipmap-$density/ic_launcher.png" -Size $size -Scale 0.84 -Fill $background
     Save-ScaledPng -SourceImage $sourceImage -Output "android/app/src/main/res/mipmap-$density/ic_launcher_round.png" -Size $size -Scale 0.84 -Fill $background
-    Save-ScaledPng -SourceImage $sourceImage -Output "android/app/src/main/res/mipmap-$density/ic_launcher_foreground.png" -Size $size -Scale 0.70 -Fill $null
+    Save-ScaledPng -SourceImage $sourceImage -Output "android/app/src/main/res/mipmap-$density/ic_launcher_foreground.png" -Size $size -Scale 0.78 -Fill $null
     $legacyIcon = Join-Path (Get-Location) "android/app/src/main/res/mipmap-$density/ic_launcher.webp"
     $legacyRound = Join-Path (Get-Location) "android/app/src/main/res/mipmap-$density/ic_launcher_round.webp"
     $legacyBackground = Join-Path (Get-Location) "android/app/src/main/res/mipmap-$density/ic_launcher_background.webp"

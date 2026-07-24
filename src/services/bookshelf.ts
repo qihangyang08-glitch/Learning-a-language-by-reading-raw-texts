@@ -49,6 +49,7 @@ export function initBookshelfTables(): void {
       FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_sentences_book ON sentences(book_id, global_index);
+    CREATE INDEX IF NOT EXISTS idx_sentences_chapter ON sentences(book_id, chapter_index, global_index);
 
     CREATE TABLE IF NOT EXISTS chapter_images (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,6 +248,35 @@ export function loadChapterSentencePreviews(bookId: string, chapterIndex: number
     index: r.global_index,
     sentenceIndex: r.sentence_index,
     preview: r.text.length > maxLength ? r.text.slice(0, maxLength) + '…' : r.text,
+  }));
+}
+
+/** Search sentence previews directly in SQLite without hydrating every chapter. */
+export function searchSentencePreviews(
+  bookId: string,
+  query: string,
+  limit = 200,
+  maxLength = 60,
+): Array<{ index: number; chapterIndex: number; sentenceIndex: number; preview: string }> {
+  const q = query.trim();
+  if (!q) return [];
+
+  const rows = getDb().getAllSync<{
+    chapter_index: number; global_index: number; sentence_index: number; text: string;
+  }>(
+    `SELECT chapter_index, global_index, sentence_index, text
+     FROM sentences
+     WHERE book_id = ? AND text LIKE ?
+     ORDER BY global_index
+     LIMIT ?`,
+    [bookId, `%${q}%`, limit],
+  );
+
+  return rows.map((r) => ({
+    index: r.global_index,
+    chapterIndex: r.chapter_index,
+    sentenceIndex: r.sentence_index,
+    preview: r.text.length > maxLength ? r.text.slice(0, maxLength) + '...' : r.text,
   }));
 }
 

@@ -15,7 +15,7 @@
         {
           "image": "./assets/splash-icon.png",
           "resizeMode": "contain",
-          "imageWidth": 220,
+          "imageWidth": 288,
           "backgroundColor": "#faf9f6"
         }
       ],
@@ -30,9 +30,11 @@
     },
     "android": {
       "package": "com.jareader.app",
+      "icon": "./assets/icon.png",
       "adaptiveIcon": {
         "backgroundColor": "#faf9f6",
-        "foregroundImage": "./assets/android-icon-foreground.png"
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false
     },

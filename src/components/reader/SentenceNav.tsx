@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,11 +14,13 @@ import {
 import {
   loadChapterGroups,
   loadChapterSentencePreviews,
+  searchSentencePreviews,
 } from '../../services/bookshelf';
 import { Colors } from '../../utils/constants';
 
 interface SentencePreview {
   index: number;
+  chapterIndex?: number;
   sentenceIndex: number;
   preview: string;
 }
@@ -58,34 +60,58 @@ export function SentenceNav({
   const [search, setSearch] = useState('');
   const [chapters, setChapters] = useState<ChapterGroup[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchResults, setSearchResults] = useState<SentencePreview[] | null>(null);
   const [expandedChapters, setExpandedChapters] = useState<Set<number>>(new Set());
   const { height } = useWindowDimensions();
 
   // Load chapter groups on open
   useEffect(() => {
+    let cancelled = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
     if (visible && bookId) {
       setLoading(true);
-      try {
-        const groups = loadChapterGroups(bookId);
-        setChapters(groups);
+      timerId = setTimeout(() => {
+        try {
+          const groups = loadChapterGroups(bookId);
+          const currentChapter = groups.find(
+            (g) => g.firstIndex <= currentIndex && g.firstIndex + g.count > currentIndex,
+          );
+          const hydratedGroups = currentChapter
+            ? groups.map((group) => (
+                group.chapterIndex === currentChapter.chapterIndex
+                  ? { ...group, sentences: loadChapterSentencePreviews(bookId, group.chapterIndex) }
+                  : group
+              ))
+            : groups;
 
-        // Auto-expand the chapter containing the current sentence
-        const currentChapter = groups.find(
-          (g) => g.firstIndex <= currentIndex && g.firstIndex + g.count > currentIndex,
-        );
-        if (currentChapter) {
-          setExpandedChapters(new Set([currentChapter.chapterIndex]));
+          if (cancelled) return;
+          setChapters(hydratedGroups);
+          setExpandedChapters(currentChapter ? new Set([currentChapter.chapterIndex]) : new Set());
+        } catch (err) {
+          if (cancelled) return;
+          console.warn('[SentenceNav] Load failed:', err);
+          setChapters([]);
+          setExpandedChapters(new Set());
+        } finally {
+          if (!cancelled) setLoading(false);
         }
-      } catch (err) {
-        console.warn('[SentenceNav] Load failed:', err);
-        setChapters([]);
-      }
-      setLoading(false);
+      }, 0);
     }
     if (!visible) {
       setSearch('');
+      setSearchResults(null);
+      setSearchLoading(false);
+      setLoading(false);
+      setChapters([]);
       setExpandedChapters(new Set());
     }
+
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
   }, [visible, bookId, currentIndex]);
 
   // Toggle chapter expansion — lazy load sentences
@@ -111,29 +137,39 @@ export function SentenceNav({
     });
   }, [bookId]);
 
-  // Search filter
-  const searchResults = useMemo(() => {
-    if (!search.trim()) return null;
-    const q = search.toLowerCase();
-    const results: SentencePreview[] = [];
+  // Search directly in SQLite and keep results capped.
+  useEffect(() => {
+    const q = search.trim();
+    let cancelled = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
 
-    for (const ch of chapters) {
-      // Load sentences for search if not loaded
-      if (!ch.sentences && bookId) {
-        ch.sentences = loadChapterSentencePreviews(bookId, ch.chapterIndex);
-      }
-      if (ch.sentences) {
-        for (const s of ch.sentences) {
-          if (s.preview.toLowerCase().includes(q)) {
-            results.push(s);
-          }
-        }
-      }
+    if (!visible || !bookId || !q) {
+      setSearchResults(null);
+      setSearchLoading(false);
+      return () => {};
     }
-    return results.slice(0, 200); // cap search results
-  }, [search, chapters, bookId]);
+
+    setSearchLoading(true);
+    timerId = setTimeout(() => {
+      try {
+        const results = searchSentencePreviews(bookId, q, 200);
+        if (!cancelled) setSearchResults(results);
+      } catch (err) {
+        console.warn('[SentenceNav] Search failed:', err);
+        if (!cancelled) setSearchResults([]);
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [search, visible, bookId]);
 
   const panelHeight = height * 0.62;
+  const hasSearch = search.trim().length > 0;
 
   return (
     <Modal
@@ -172,13 +208,13 @@ export function SentenceNav({
             <View style={styles.loadingWrap}>
               <ActivityIndicator size="small" color={Colors.accent} />
             </View>
-          ) : searchResults ? (
+          ) : hasSearch ? (
             <FlatList
-              data={searchResults}
+              data={searchResults ?? []}
               keyExtractor={(s) => `sr-${s.index}`}
               renderItem={({ item }) => (
                 <SentenceRow
-                  chapterIndex={0}
+                  chapterIndex={item.chapterIndex ?? 0}
                   sentence={item}
                   isActive={item.index === currentIndex}
                   isBookmarked={bookmarks.has(item.index)}
@@ -187,7 +223,11 @@ export function SentenceNav({
               )}
               ListEmptyComponent={
                 <View style={styles.empty}>
-                  <Text style={styles.emptyText}>无匹配结果</Text>
+                  {searchLoading ? (
+                    <ActivityIndicator size="small" color={Colors.accent} />
+                  ) : (
+                    <Text style={styles.emptyText}>无匹配结果</Text>
+                  )}
                 </View>
               }
             />
